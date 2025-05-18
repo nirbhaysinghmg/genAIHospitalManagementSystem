@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Chatbot Widget Demo</title>
+</head>
+<body>
+  <div id="root"></div>
+  
+  <script>
+    function openChatbot() {
+      document.getElementById('chatbot').style.display = 'block';
+      document.getElementById('elan-ai-button').style.display = 'none';
+      // Update the visibility state for scroll locking
+      if (window.setChatbotVisible) {
+        window.setChatbotVisible(true);
+      }
+    }
+  </script>
+</body>
+</html> 

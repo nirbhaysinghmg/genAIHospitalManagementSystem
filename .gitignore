@@ -1,0 +1,6 @@
+node_modules
+.env
+chroma_db
+.venv311
+.qodo
+.vs
