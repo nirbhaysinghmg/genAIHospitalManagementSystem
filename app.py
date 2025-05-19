@@ -8,6 +8,7 @@ from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGener
 from langchain_chroma import Chroma
 from langchain.text_splitter import CharacterTextSplitter
 from langchain.chains import RetrievalQA
+from langchain.chains import ConversationalRetrievalChain
 from langchain_core.documents import Document
 import json
 
@@ -18,13 +19,13 @@ load_dotenv()
 # Initialize FastAPI with WebSocket support
 app = FastAPI(title="Google Gen AI RAG App with ChromaDB")
 
-# Add CORS middleware
+# Add CORS middleware with specific origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allows all origins
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],  # Add your frontend URL
     allow_credentials=True,
-    allow_methods=["*"],  # Allows all methods
-    allow_headers=["*"],  # Allows all headers
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Load CSV into DataFrame
@@ -85,62 +86,148 @@ llm = ChatGoogleGenerativeAI(
     disable_streaming=True  # Changed from streaming=False
 )
 
+# Store chat histories for different sessions
+chat_histories = {}
+
 # Pydantic model for query
 class QueryRequest(BaseModel):
     question: str
+    session_id: str = None
 
 @app.post("/query")
 async def query_qa(req: QueryRequest):
     # Build retriever
     retriever = vector_store.as_retriever(search_kwargs={"k": 5})
-    qa = RetrievalQA.from_chain_type(llm=llm, chain_type="stuff", retriever=retriever)
+    
+    # Use session_id to maintain separate chat histories
+    session_id = req.session_id or "default"
+    
+    if session_id not in chat_histories:
+        chat_histories[session_id] = []
+    
+    # Use ConversationalRetrievalChain instead of RetrievalQA
+    qa = ConversationalRetrievalChain.from_llm(
+        llm=llm,
+        retriever=retriever,
+        return_source_documents=True
+    )
+    
     try:
-        answer = qa.run(req.question)
+        # Get answer using chat history
+        result = qa({"question": req.question, "chat_history": chat_histories[session_id]})
+        answer = result["answer"]
+        
+        # Update chat history with the new Q&A pair
+        chat_histories[session_id].append((req.question, answer))
+        
+        # Limit chat history length to prevent context overflow
+        if len(chat_histories[session_id]) > 10:
+            chat_histories[session_id] = chat_histories[session_id][-10:]
+        
+        # Get source documents
+        source_docs = result.get("source_documents", [])
+        sources = [doc.metadata["source"] for doc in source_docs]
+        
+        return {"answer": answer, "sources": sources}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    return {"answer": answer, "sources": [doc.metadata["source"] for doc in retriever.get_relevant_documents(req.question)]}
 
 # WebSocket endpoint at /ws
 @app.websocket("/ws")
 async def websocket_endpoint_ws(websocket: WebSocket):
-    await websocket.accept()
-    
     try:
+        print("New WebSocket connection attempt...")
+        await websocket.accept()
+        print("WebSocket connection accepted")
+        
+        # Create a unique session ID for this WebSocket connection
+        session_id = str(uuid.uuid4())
+        chat_histories[session_id] = []
+        print(f"Created new session: {session_id}")
+        
         while True:
-            # Receive message from client
-            data = await websocket.receive_text()
-            message = json.loads(data)
-            
-            # Process the message
-            if "user_input" in message:
-                # Build retriever
-                retriever = vector_store.as_retriever(search_kwargs={"k": 5})
-                qa = RetrievalQA.from_chain_type(llm=llm, chain_type="stuff", retriever=retriever)
+            try:
+                # Receive message from client
+                data = await websocket.receive_text()
+                print(f"Received message from client: {data[:100]}...")  # Log first 100 chars
+                message = json.loads(data)
                 
-                try:
-                    # Get answer from RAG
-                    answer = qa.run(message["user_input"])
+                # Process the message
+                if "user_input" in message:
+                    print(f"Processing user input: {message['user_input'][:50]}...")
                     
-                    # Send response back to client
-                    await websocket.send_json({
-                        "text": answer,
-                        "sources": [doc.metadata["source"] for doc in retriever.get_relevant_documents(message["user_input"])],
-                        "done": True  # Add this flag to indicate response is complete
-                    })
+                    # Get chat history from message
+                    chat_history = message.get("chat_history", [])
+                    if chat_history:
+                        # Convert the chat history to the format expected by the chain
+                        formatted_history = [(msg["content"], "") for msg in chat_history if msg["role"] == "user"]
+                        chat_histories[session_id] = formatted_history
                     
-                    # Add a debug message to confirm the response was sent
-                    print(f"Response sent with done=True flag for: {message['user_input'][:50]}...")
+                    # Build retriever
+                    retriever = vector_store.as_retriever(search_kwargs={"k": 5})
                     
-                except Exception as e:
-                    await websocket.send_json({
-                        "error": f"Error processing your request: {str(e)}",
-                        "done": True  # Also add for error responses
-                    })
-                    print(f"Error response sent: {str(e)}")
+                    # Use ConversationalRetrievalChain
+                    qa = ConversationalRetrievalChain.from_llm(
+                        llm=llm,
+                        retriever=retriever,
+                        return_source_documents=True
+                    )
+                    
+                    try:
+                        # Get answer using chat history
+                        result = qa({
+                            "question": message["user_input"],
+                            "chat_history": chat_histories[session_id]
+                        })
+                        answer = result["answer"]
+                        
+                        # Update chat history
+                        chat_histories[session_id].append((message["user_input"], answer))
+                        
+                        # Limit chat history length
+                        if len(chat_histories[session_id]) > 10:
+                            chat_histories[session_id] = chat_histories[session_id][-10:]
+                        
+                        # Get source documents
+                        source_docs = result.get("source_documents", [])
+                        sources = [doc.metadata["source"] for doc in source_docs]
+                        
+                        # Send response back to client
+                        response = {
+                            "text": answer,
+                            "sources": sources,
+                            "done": True
+                        }
+                        await websocket.send_json(response)
+                        print(f"Response sent successfully for session {session_id}")
+                        
+                    except Exception as e:
+                        error_msg = f"Error processing request: {str(e)}"
+                        print(error_msg)
+                        await websocket.send_json({
+                            "error": error_msg,
+                            "done": True
+                        })
+            except WebSocketDisconnect:
+                print(f"WebSocket disconnected for session {session_id}")
+                break
+            except Exception as e:
+                print(f"Error in WebSocket loop: {str(e)}")
+                await websocket.send_json({
+                    "error": f"Internal server error: {str(e)}",
+                    "done": True
+                })
+                break
     except Exception as e:
-        print(f"WebSocket error: {str(e)}")
+        print(f"Fatal WebSocket error: {str(e)}")
     finally:
-        await websocket.close()
+        print(f"Cleaning up session {session_id}")
+        if session_id in chat_histories:
+            del chat_histories[session_id]
+        try:
+            await websocket.close()
+        except:
+            pass
 
 # Keep the original endpoint for backward compatibility
 @app.websocket("/ws/chat")
@@ -151,6 +238,7 @@ if __name__ == "__main__":
     import uvicorn
     print("Starting server on http://0.0.0.0:8000")
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
 
 
 

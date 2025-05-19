@@ -8,6 +8,7 @@ export const useChatSocket = (setChatHistory, setStreaming, customChatUrl) => {
   const ws = useRef(null);
   const retryCount = useRef(0);
   const reconnectTimeout = useRef(null);
+  const chatHistoryRef = useRef([]);
 
   // Use the provided URL or fall back to default
   const chatUrl = customChatUrl || "ws://localhost:8000/ws";
@@ -38,17 +39,13 @@ export const useChatSocket = (setChatHistory, setStreaming, customChatUrl) => {
       retryCount.current,
       ")"
     );
-
-    // Update connection status
     setConnectionStatus("CONNECTING");
 
     try {
-      // Close existing connection if any
       if (ws.current) {
         ws.current.close();
       }
 
-      // Create new WebSocket connection
       ws.current = new WebSocket(chatUrl);
 
       ws.current.onopen = () => {
@@ -62,7 +59,6 @@ export const useChatSocket = (setChatHistory, setStreaming, customChatUrl) => {
         try {
           const data = JSON.parse(event.data);
 
-          // Handle error messages
           if (data.error) {
             console.error("Error from server:", data.error);
             setChatHistory((prev) => [
@@ -73,7 +69,6 @@ export const useChatSocket = (setChatHistory, setStreaming, customChatUrl) => {
             return;
           }
 
-          // Handle text messages (from backend)
           if (data.text) {
             setChatHistory((prev) => {
               const lastMessage = prev[prev.length - 1];
@@ -82,8 +77,10 @@ export const useChatSocket = (setChatHistory, setStreaming, customChatUrl) => {
                 lastMessage.role === "assistant" &&
                 !lastMessage.completed
               ) {
-                const updatedMessage = { ...lastMessage, text: data.text };
-                return [...prev.slice(0, -1), updatedMessage];
+                return [
+                  ...prev.slice(0, -1),
+                  { ...lastMessage, text: data.text },
+                ];
               } else {
                 return [
                   ...prev,
@@ -93,13 +90,14 @@ export const useChatSocket = (setChatHistory, setStreaming, customChatUrl) => {
             });
           }
 
-          // Handle completion flag
           if (data.done) {
             setChatHistory((prev) => {
               const lastMessage = prev[prev.length - 1];
               if (lastMessage && lastMessage.role === "assistant") {
-                const updatedMessage = { ...lastMessage, completed: true };
-                return [...prev.slice(0, -1), updatedMessage];
+                return [
+                  ...prev.slice(0, -1),
+                  { ...lastMessage, completed: true },
+                ];
               }
               return prev;
             });
@@ -113,7 +111,6 @@ export const useChatSocket = (setChatHistory, setStreaming, customChatUrl) => {
       ws.current.onerror = (error) => {
         console.error("WebSocket error:", error);
         setConnectionStatus("ERROR");
-        // Don't close here, let onclose handle it
       };
 
       ws.current.onclose = (event) => {
@@ -152,11 +149,17 @@ export const useChatSocket = (setChatHistory, setStreaming, customChatUrl) => {
         console.log("WebSocket not connected, attempting to connect...");
         connectWebSocket();
 
-        // Wait for connection and then send
         waitForConnection()
           .then(() => {
             console.log("Connection established, sending message");
-            ws.current.send(JSON.stringify(message));
+            const formattedMessage = {
+              user_input: message.user_input || message,
+              chat_history: chatHistoryRef.current.map((msg) => ({
+                role: msg.role,
+                content: msg.text,
+              })),
+            };
+            ws.current.send(JSON.stringify(formattedMessage));
           })
           .catch((error) => {
             console.error("Failed to establish connection:", error);
@@ -171,20 +174,30 @@ export const useChatSocket = (setChatHistory, setStreaming, customChatUrl) => {
             setStreaming(false);
           });
       } else {
-        // WebSocket is already open, send directly
         console.log("Sending message via WebSocket");
-        ws.current.send(JSON.stringify(message));
+        const formattedMessage = {
+          user_input: message.user_input || message,
+          chat_history: chatHistoryRef.current.map((msg) => ({
+            role: msg.role,
+            content: msg.text,
+          })),
+        };
+        ws.current.send(JSON.stringify(formattedMessage));
       }
     },
     [connectWebSocket, waitForConnection, setChatHistory, setStreaming]
   );
+
+  // Update chat history ref when chat history changes
+  useEffect(() => {
+    chatHistoryRef.current = chatHistoryRef.current || [];
+  }, []);
 
   // Connect on component mount
   useEffect(() => {
     console.log("Initializing WebSocket connection to:", chatUrl);
     connectWebSocket();
 
-    // Cleanup on unmount
     return () => {
       console.log("Cleaning up WebSocket connection");
       if (reconnectTimeout.current) {
