@@ -79,43 +79,36 @@ export const useChatSocket = (setChatHistory, setStreaming, customChatUrl) => {
               ) {
                 return [
                   ...prev.slice(0, -1),
-                  { ...lastMessage, text: data.text },
+                  { ...lastMessage, text: data.text, completed: data.done },
                 ];
               } else {
                 return [
                   ...prev,
-                  { role: "assistant", text: data.text, completed: false },
+                  { role: "assistant", text: data.text, completed: data.done },
                 ];
               }
             });
           }
 
           if (data.done) {
-            setChatHistory((prev) => {
-              const lastMessage = prev[prev.length - 1];
-              if (lastMessage && lastMessage.role === "assistant") {
-                return [
-                  ...prev.slice(0, -1),
-                  { ...lastMessage, completed: true },
-                ];
-              }
-              return prev;
-            });
             setStreaming(false);
           }
         } catch (error) {
           console.error("Error parsing message:", error, event.data);
+          setStreaming(false);
         }
       };
 
       ws.current.onerror = (error) => {
         console.error("WebSocket error:", error);
         setConnectionStatus("ERROR");
+        setStreaming(false);
       };
 
       ws.current.onclose = (event) => {
         console.log("WebSocket disconnected:", event);
         setConnectionStatus("DISCONNECTED");
+        setStreaming(false);
 
         if (retryCount.current < MAX_RETRIES) {
           const delay = Math.min(1000 * Math.pow(2, retryCount.current), 30000);
@@ -139,6 +132,7 @@ export const useChatSocket = (setChatHistory, setStreaming, customChatUrl) => {
     } catch (error) {
       console.error("Error creating WebSocket:", error);
       setConnectionStatus("ERROR");
+      setStreaming(false);
     }
   }, [chatUrl, setChatHistory, setStreaming]);
 
@@ -152,13 +146,27 @@ export const useChatSocket = (setChatHistory, setStreaming, customChatUrl) => {
         waitForConnection()
           .then(() => {
             console.log("Connection established, sending message");
+            const userId = localStorage.getItem('healthcare_user_id') || 
+              'user_' + Math.random().toString(36).substring(2, 15);
+            const sessionId = localStorage.getItem('healthcare_session_id') || 
+              'session_' + Math.random().toString(36).substring(2, 15);
+            
+            // Store IDs if they don't exist
+            if (!localStorage.getItem('healthcare_user_id')) {
+              localStorage.setItem('healthcare_user_id', userId);
+            }
+            localStorage.setItem('healthcare_session_id', sessionId);
+            
             const formattedMessage = {
               user_input: message.user_input || message,
               chat_history: chatHistoryRef.current.map((msg) => ({
                 role: msg.role,
                 content: msg.text,
               })),
+              user_id: userId,
+              session_id: sessionId
             };
+            console.log("Sending message:", formattedMessage);
             ws.current.send(JSON.stringify(formattedMessage));
           })
           .catch((error) => {
@@ -175,13 +183,27 @@ export const useChatSocket = (setChatHistory, setStreaming, customChatUrl) => {
           });
       } else {
         console.log("Sending message via WebSocket");
+        const userId = localStorage.getItem('healthcare_user_id') || 
+          'user_' + Math.random().toString(36).substring(2, 15);
+        const sessionId = localStorage.getItem('healthcare_session_id') || 
+          'session_' + Math.random().toString(36).substring(2, 15);
+        
+        // Store IDs if they don't exist
+        if (!localStorage.getItem('healthcare_user_id')) {
+          localStorage.setItem('healthcare_user_id', userId);
+        }
+        localStorage.setItem('healthcare_session_id', sessionId);
+        
         const formattedMessage = {
           user_input: message.user_input || message,
           chat_history: chatHistoryRef.current.map((msg) => ({
             role: msg.role,
             content: msg.text,
           })),
+          user_id: userId,
+          session_id: sessionId
         };
+        console.log("Sending message:", formattedMessage);
         ws.current.send(JSON.stringify(formattedMessage));
       }
     },
@@ -217,3 +239,4 @@ export const useChatSocket = (setChatHistory, setStreaming, customChatUrl) => {
     connectionStatus,
   };
 };
+

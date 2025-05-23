@@ -110,7 +110,11 @@ const ChatWidget = ({ config: userConfig }) => {
 
     // Add user message to chat
     setChatHistory((prev) => [...prev, { role: "user", text }]);
+    
+    // Set streaming to true BEFORE sending the message
     setStreaming(true);
+    
+    console.log("Setting streaming to true");
 
     // Check if this is an appointment scheduling request
     const schedulingPhrases = [
@@ -487,3 +491,5 @@ const ChatWidget = ({ config: userConfig }) => {
 };
 
 export default ChatWidget;
+
+

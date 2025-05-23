@@ -251,6 +251,76 @@ if (typeof window !== "undefined") {
       chatbot.classList.remove("hidden");
       chatbot.style.display = "block";
       console.log("Chatbot display updated");
+
+      // Track chatbot opened
+      const userId =
+        localStorage.getItem("healthcare_user_id") ||
+        "user_" + Math.random().toString(36).substring(2, 15);
+      const sessionId =
+        localStorage.getItem("healthcare_session_id") ||
+        "session_" + Math.random().toString(36).substring(2, 15);
+
+      // Store IDs if they don't exist
+      if (!localStorage.getItem("healthcare_user_id")) {
+        localStorage.setItem("healthcare_user_id", userId);
+      }
+      localStorage.setItem("healthcare_session_id", sessionId);
+
+      console.log(
+        `Tracking chatbot opened: user=${userId}, session=${sessionId}`
+      );
+
+      // Send analytics event
+      fetch("/api/analytics/chatbot/opened", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: sessionId,
+          user_id: userId,
+        }),
+      })
+        .then((response) => {
+          if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+          }
+          return response.json();
+        })
+        .then((data) => {
+          console.log("Chatbot opened tracking response:", data);
+          // Check if tracking was successful
+          if (
+            data.verification &&
+            (!data.verification.user_exists ||
+              !data.verification.session_exists)
+          ) {
+            console.error("Tracking verification failed:", data.verification);
+            // Try again with a delay
+            setTimeout(() => {
+              fetch("/api/analytics/chatbot/opened", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  session_id: sessionId,
+                  user_id: userId,
+                }),
+              });
+            }, 1000);
+          }
+        })
+        .catch((err) => {
+          console.error("Failed to track chatbot opened:", err);
+          // Try again with a delay
+          setTimeout(() => {
+            fetch("/api/analytics/chatbot/opened", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                session_id: sessionId,
+                user_id: userId,
+              }),
+            });
+          }, 1000);
+        });
     } else {
       console.error("Chatbot element not found");
     }
