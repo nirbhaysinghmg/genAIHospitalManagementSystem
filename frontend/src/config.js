@@ -4,7 +4,7 @@ const config = {
   companyLogo: "/logo.png",
   agentName: "Healthcare AI Assistant",
   projectName: "Healthcare AI",
-  chatUrl: "ws://localhost:8000/ws",  // Changed from ws://localhost:8000/ws/chat
+  chatUrl: "ws://localhost:8000/ws", // Changed from ws://localhost:8000/ws/chat
   phoneSubmitUrl: "http://localhost:8000/api/mobile",
   theme: {
     primaryColor: "#0066cc",
@@ -20,9 +20,9 @@ I can help you with appointments, medical information, and more.
   // Suggested questions that will appear after assistant replies
   suggestedQuestions: [
     "Schedule an appointment For Me",
-    "What are your operating hours?",
-    "Can I speak with a doctor online?",
-    "How do I view my medical records?",
+    "What are the departments in this hospital?",
+    "What are the services offered in this hospital?",
+    "What are the specializations in this hospital?",
     "What insurance plans do you accept?",
     "Do I need a referral to see a specialist?",
     "How can I refill my prescription?",
@@ -36,5 +36,3 @@ I can help you with appointments, medical information, and more.
 };
 
 export default config;
-
-

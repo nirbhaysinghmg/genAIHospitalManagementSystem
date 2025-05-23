@@ -10,6 +10,8 @@ from langchain.text_splitter import CharacterTextSplitter
 from langchain.chains import RetrievalQA
 from langchain.chains import ConversationalRetrievalChain
 from langchain_core.documents import Document
+
+from langchain.prompts import PromptTemplate
 import json
 
 # Load environment
@@ -35,55 +37,96 @@ print(f"Looking for CSV at: {CSV_PATH}")
 print(f"File exists: {os.path.exists(CSV_PATH)}")
 if not os.path.exists(CSV_PATH):
     raise FileNotFoundError(f"CSV file not found at {CSV_PATH}")
-df = pd.read_csv(CSV_PATH)
-
-# Print CSV structure for debugging
-print(f"CSV columns: {df.columns.tolist()}")
-print(f"CSV shape: {df.shape}")
-print(f"First row: {df.iloc[0].to_dict()}")
 
 # Prepare embeddings
 EMBED_MODEL = os.getenv("EMBED_MODEL", "models/embedding-001")
 embeddings = GoogleGenerativeAIEmbeddings(model=EMBED_MODEL, google_api_key=os.getenv("GEMINI_API_KEY"))
 
-# Split text into chunks
-splitter = CharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
-
-# Process all columns of the CSV
-documents = []
-for idx, row in df.iterrows():
-    # Convert the entire row to a string representation
-    row_dict = row.to_dict()
-    content = "\n".join([f"{k}: {v}" for k, v in row_dict.items()])
-    
-    # Use the first column as the source identifier
-    source = str(row.iloc[0])
-    
-    # Split the content into chunks
-    chunks = splitter.split_text(content)
-    for chunk in chunks:
-        documents.append(Document(page_content=chunk, metadata={"source": source, "row": idx}))
-
-print(f"Created {len(documents)} document chunks")
-
 # Initialize ChromaDB vector store
 PERSIST_DIRECTORY = os.getenv("PERSIST_DIRECTORY", "chroma_db")
 
-# Generate unique IDs for documents
-ids = [str(uuid.uuid4()) for _ in documents]
+def get_vector_store():
+    # Check if vector store already exists
+    if os.path.exists(PERSIST_DIRECTORY):
+        print("Loading existing vector store...")
+        return Chroma(
+            persist_directory=PERSIST_DIRECTORY,
+            embedding_function=embeddings
+        )
+    else:
+        print("Creating new vector store...")
+        # Load and process CSV only when creating new vector store
+        df = pd.read_csv(CSV_PATH)
+        print(f"CSV columns: {df.columns.tolist()}")
+        print(f"CSV shape: {df.shape}")
+        print(f"First row: {df.iloc[0].to_dict()}")
 
-vector_store = Chroma.from_documents(
-    documents=documents,
-    embedding=embeddings,
-    persist_directory=PERSIST_DIRECTORY,
-    ids=ids  # Pass IDs explicitly
-)
+        # Split text into chunks
+        splitter = CharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
+
+        # Process all columns of the CSV
+        documents = []
+        for idx, row in df.iterrows():
+            # Convert the entire row to a string representation
+            row_dict = row.to_dict()
+            content = "\n".join([f"{k}: {v}" for k, v in row_dict.items()])
+            
+            # Use the first column as the source identifier
+            source = str(row.iloc[0])
+            
+            # Split the content into chunks
+            chunks = splitter.split_text(content)
+            for chunk in chunks:
+                documents.append(Document(page_content=chunk, metadata={"source": source, "row": idx}))
+
+        print(f"Created {len(documents)} document chunks")
+        
+        # Generate unique IDs for documents
+        ids = [str(uuid.uuid4()) for _ in documents]
+        
+        vector_store = Chroma.from_documents(
+            documents=documents,
+            embedding=embeddings,
+            persist_directory=PERSIST_DIRECTORY,
+            ids=ids
+        )
+        # Persist the vector store
+        return vector_store
+
+# Initialize vector store
+vector_store = get_vector_store()
 
 # Initialize LLM
 llm = ChatGoogleGenerativeAI(
     model=os.getenv("LLM_MODEL", "gemini-2.0-flash"),
     google_api_key=os.getenv("GEMINI_API_KEY"),
     disable_streaming=True  # Changed from streaming=False
+)
+
+# Define system prompt
+SYSTEM_PROMPT = PromptTemplate(
+    input_variables=["context", "question", "chat_history"],
+    template="""You are a helpful hospital information assistant. Your role is to:
+1. Provide accurate and concise information about hospital services, facilities, and procedures
+2. If user say to Schedule an appointment, then you should say that you can schedule an appointment by filling the form i am giving you below, Do not provide any other infomation, do not create your own form cause we will make the form appear from the frontend website.
+3. Be professional and empathetic in your responses
+4. If you don't know something, admit it and suggest contacting the hospital directly
+5. Focus on factual information from the provided hospital data
+6. Format your responses in a clear, easy-to-read manner
+6. When discussing medical conditions or treatments, always include a disclaimer about consulting healthcare professionals
+7. For appointment-related queries, guide users to use the appointment scheduling feature
+
+Remember to:
+- Stay within the scope of the information provided in the hospital data
+- Be clear about what information is available and what isn't
+- Maintain patient confidentiality
+- Provide practical, actionable information
+
+Context: {context}
+Chat History: {chat_history}
+Question: {question}
+
+Answer:"""
 )
 
 # Store chat histories for different sessions
@@ -109,12 +152,16 @@ async def query_qa(req: QueryRequest):
     qa = ConversationalRetrievalChain.from_llm(
         llm=llm,
         retriever=retriever,
-        return_source_documents=True
+        return_source_documents=True,
+        combine_docs_chain_kwargs={"prompt": SYSTEM_PROMPT}
     )
     
     try:
         # Get answer using chat history
-        result = qa({"question": req.question, "chat_history": chat_histories[session_id]})
+        result = qa({
+            "question": req.question,
+            "chat_history": chat_histories[session_id]
+        })
         answer = result["answer"]
         
         # Update chat history with the new Q&A pair
@@ -170,7 +217,8 @@ async def websocket_endpoint_ws(websocket: WebSocket):
                     qa = ConversationalRetrievalChain.from_llm(
                         llm=llm,
                         retriever=retriever,
-                        return_source_documents=True
+                        return_source_documents=True,
+                        combine_docs_chain_kwargs={"prompt": SYSTEM_PROMPT}
                     )
                     
                     try:

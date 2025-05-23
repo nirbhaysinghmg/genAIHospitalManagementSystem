@@ -113,10 +113,21 @@ const ChatWidget = ({ config: userConfig }) => {
     setStreaming(true);
 
     // Check if this is an appointment scheduling request
-    if (
-      text.toLowerCase().includes("schedule") &&
-      text.toLowerCase().includes("appointment")
-    ) {
+    const schedulingPhrases = [
+      "schedule an appointment",
+      "book an appointment",
+      "make an appointment",
+      "set up an appointment",
+      "i need an appointment",
+      "booking",
+    ];
+
+    const normalizedText = text.toLowerCase().trim();
+    const isSchedulingRequest = schedulingPhrases.some((phrase) =>
+      normalizedText.includes(phrase.toLowerCase())
+    );
+
+    if (isSchedulingRequest) {
       setShowScheduleForm(true);
       // Still send the message to get AI response
     }
@@ -310,7 +321,11 @@ const ChatWidget = ({ config: userConfig }) => {
                     : `${cfg.companyName} AI Assistant`}
                 </div>
               )}
-              <div className="message">
+              <div
+                className={`message ${
+                  msg.role === "assistant" ? "assistant-message" : ""
+                }`}
+              >
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>
                   {msg.text}
                 </ReactMarkdown>
@@ -440,7 +455,7 @@ const ChatWidget = ({ config: userConfig }) => {
             placeholder={cfg.inputPlaceholder}
             rows="1"
             className="chat-input"
-            disabled={streaming || showScheduleForm}
+            disabled={streaming}
             style={{ height: "55px" }}
           />
           <button
@@ -450,7 +465,7 @@ const ChatWidget = ({ config: userConfig }) => {
                 handleSendMessage();
               }
             }}
-            disabled={!input.trim() || streaming || showScheduleForm}
+            disabled={!input.trim() || streaming}
             aria-label="Send message"
           >
             <svg
