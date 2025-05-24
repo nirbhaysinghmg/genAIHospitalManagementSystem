@@ -42,11 +42,25 @@ const ChatWidget = ({ config: userConfig }) => {
   const textareaRef = useRef(null);
 
   // WebSocket connection
-  const { sendMessage, connectionStatus } = useChatSocket(
+  const { sendMessage, connectionStatus, trackUserAction } = useChatSocket(
     setChatHistory,
     setStreaming,
     cfg.chatUrl
   );
+
+  // Add session tracking on component mount
+  useEffect(() => {
+    // Track page load/refresh as a new session
+    trackUserAction('session_start', { 
+      referrer: document.referrer,
+      userAgent: navigator.userAgent
+    });
+    
+    // Track session end on unmount
+    return () => {
+      trackUserAction('session_end');
+    };
+  }, [trackUserAction]);
 
   // Seed the initial system message
   useEffect(() => {
@@ -108,13 +122,12 @@ const ChatWidget = ({ config: userConfig }) => {
   const handleSendMessage = (text = input) => {
     if (!text.trim() || streaming) return;
 
+    // Track user question
+    trackUserAction('question_asked', { question: text });
+    
     // Add user message to chat
     setChatHistory((prev) => [...prev, { role: "user", text }]);
-    
-    // Set streaming to true BEFORE sending the message
     setStreaming(true);
-    
-    console.log("Setting streaming to true");
 
     // Check if this is an appointment scheduling request
     const schedulingPhrases = [
@@ -231,6 +244,12 @@ const ChatWidget = ({ config: userConfig }) => {
       });
       setScheduleFormSubmitted(false);
     }, 1000);
+  };
+
+  // Add tracking to chatbot open function
+  const handleChatbotOpen = () => {
+    trackUserAction('chatbot_opened', { method: 'button_click' });
+    window.openChatbot();
   };
 
   return (
@@ -491,5 +510,4 @@ const ChatWidget = ({ config: userConfig }) => {
 };
 
 export default ChatWidget;
-
 

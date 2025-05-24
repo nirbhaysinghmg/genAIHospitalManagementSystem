@@ -3,132 +3,53 @@
 import React from "react";
 import ReactDOM from "react-dom";
 import ChatWidget from "./components/ChatWidget";
-// import "./components/ChatWidget.css";  // Removed
-
-// Default configuration
-const defaultConfig = {
-  container: "#healthcare-ai-container",
-  chatUrl: "ws://localhost:8000/ws", // Changed from ws://localhost:8000/ws/chat
-  companyName: "Healthcare AI",
-  companyLogo: "/logo.png",
-  primaryColor: "#0066cc",
-  showButton: true,
-  showGreeting: true,
-  greetingText:
-    "Need help with your healthcare needs? Chat with our AI assistant!",
-  introductionText:
-    "Hello! I'm your healthcare assistant. How can I help you today?",
-  inputPlaceholder: "Ask about appointments, departments, or services...",
-};
-
+import "./components/ChatWidget.css"; // Widget styles
 // UMD export: exposes HealthcareAIWidget.init(...)
 const HealthcareAIWidget = {
-  init: (userConfig = {}) => {
-    console.log("Initializing HealthcareAIWidget");
+  init: (userConfig) => {
+    // Default configuration
+    const config = {
+      container: "#healthcare-ai-container",
+      baseUrl: "http://localhost:8000",
+      companyName: "Healthcare AI",
+      companyLogo: "/logo.png",
+      primaryColor: "#0066cc",
+      showButton: true,
+      showGreeting: true,
+      greetingText:
+        "Need help with your healthcare needs? Chat with our AI assistant!",
+      introductionText:
+        "Hello! I'm your healthcare assistant. How can I help you today?",
+      inputPlaceholder: "Ask about appointments, departments, or services...",
+      ...userConfig,
+    };
 
-    // Merge user config with defaults
-    const config = { ...defaultConfig, ...userConfig };
-
-    console.log("Using configuration:", config);
-    console.log("WebSocket URL:", config.chatUrl);
-
-    // Validate WebSocket URL
-    if (!config.chatUrl) {
-      console.error("No WebSocket URL provided. Using default localhost URL.");
-      config.chatUrl = "ws://localhost:8000/ws/chat";
-    }
-
-    // Ensure WebSocket URL has correct protocol
-    if (
-      !config.chatUrl.startsWith("ws://") &&
-      !config.chatUrl.startsWith("wss://")
-    ) {
-      console.error(
-        "Invalid WebSocket URL protocol. URL must start with ws:// or wss://"
-      );
-      return;
-    }
-
-    // Check for existing chatbot container
-    let container = null;
-
-    // First check if there's an existing chatbot div
-    const existingChatbot = document.getElementById("chatbot");
-
-    if (existingChatbot) {
-      console.log("Found existing chatbot container with id 'chatbot'");
-      container = existingChatbot;
-    } else {
-      // If no existing chatbot, use the specified container
-      container =
-        typeof config.container === "string"
-          ? document.querySelector(config.container)
-          : config.container;
-    }
+    // Allow passing either a selector string or a DOM node
+    const container =
+      typeof config.container === "string"
+        ? document.querySelector(config.container)
+        : config.container;
 
     if (!container) {
       console.error(`Chatbot container not found: ${config.container}`);
       return;
     }
 
-    // Create chat button if it doesn't exist and showButton is true
-    if (config.showButton) {
-      // First, check if there's an existing button with id "elan-ai-button"
-      const existingButton = document.getElementById("elan-ai-button");
+    // Create a button to open the chatbot if specified
+    if (config.showButton !== false) {
+      const buttonId = "healthcare-ai-button";
+      let button = document.getElementById(buttonId);
 
-      if (existingButton) {
-        console.log(
-          "Found existing button with id 'elan-ai-button', will use it instead of creating a new one"
-        );
-
-        // Update the existing button's click handler
-        existingButton.onclick = function (e) {
-          e.preventDefault();
-          e.stopPropagation();
-          console.log("Existing button clicked");
-          window.openChatbot();
-          return false;
-        };
-
-        // Add hover effect if not already present
-        if (!document.querySelector("style#elan-button-style")) {
-          const style = document.createElement("style");
-          style.id = "elan-button-style";
-          style.textContent = `
-            #elan-ai-button:hover {
-              transform: translateY(-3px);
-              box-shadow: 0 6px 20px rgba(0,74,173,0.45);
-              background: linear-gradient(135deg, #0052c2 0%, #0074e8 100%);
-            }
-            
-            #elan-ai-button:active {
-              transform: translateY(0);
-              box-shadow: 0 3px 10px rgba(0,74,173,0.3);
-            }
-            
-            @media (max-width: 768px) {
-              #elan-ai-button {
-                width: auto;
-                padding: 12px !important;
-              }
-              
-              #elan-ai-button span {
-                display: none;
-              }
-            }
-          `;
-          document.head.appendChild(style);
-        }
-      } else if (!document.getElementById("healthcare-ai-button")) {
-        // Create button only if no existing button and no healthcare-ai-button
-        const button = document.createElement("div");
-        button.id = "healthcare-ai-button";
+      if (!button) {
+        button = document.createElement("div");
+        button.id = buttonId;
         button.className = "healthcare-ai-button";
         button.innerHTML = `
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+            <path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"></path>
           </svg>
         `;
+        document.body.appendChild(button);
 
         // Style the button
         Object.assign(button.style, {
@@ -148,211 +69,127 @@ const HealthcareAIWidget = {
           zIndex: "999",
         });
 
-        document.body.appendChild(button);
-
-        // Explicitly attach click event to ensure it works on all devices
-        button.addEventListener("click", function (e) {
-          e.preventDefault();
-          e.stopPropagation();
-          console.log("Button clicked");
+        // Add click event to open chatbot with tracking
+        button.addEventListener("click", function () {
+          // Create a custom event that components can listen for
+          const event = new CustomEvent("chatbotOpened", {
+            detail: { method: "button_click" },
+          });
+          document.dispatchEvent(event);
           window.openChatbot();
-          return false;
         });
-
-        console.log("Chat button created and added to the page");
-      } else {
-        console.log("Chat button already exists");
       }
     }
 
-    // Create greeting message if enabled
-    if (
-      config.showGreeting &&
-      !document.getElementById("healthcare-ai-greeting")
-    ) {
-      const greeting = document.createElement("div");
-      greeting.id = "healthcare-ai-greeting";
-      greeting.className = "healthcare-ai-greeting";
-      greeting.innerHTML = `
-        <p>${config.greetingText}</p>
-        <span class="greeting-close">&times;</span>
-      `;
+    // Add greeting message if specified
+    if (config.showGreeting) {
+      const greetingId = "healthcare-ai-greeting";
+      let greeting = document.getElementById(greetingId);
 
-      // Style the greeting
-      Object.assign(greeting.style, {
-        position: "fixed",
-        bottom: "90px",
-        right: "20px",
-        maxWidth: "300px",
-        padding: "15px",
-        backgroundColor: "white",
-        borderRadius: "10px",
-        boxShadow: "0 4px 8px rgba(0,0,0,0.1)",
-        zIndex: "998",
-        transition: "all 0.3s ease",
-      });
+      if (!greeting) {
+        greeting = document.createElement("div");
+        greeting.id = greetingId;
+        greeting.className = "healthcare-ai-greeting";
+        greeting.innerHTML = `
+          <p>${
+            config.greetingText ||
+            "Need help with your healthcare needs? Chat with our AI assistant!"
+          }</p>
+          <span class="greeting-close">&times;</span>
+        `;
+        document.body.appendChild(greeting);
 
-      document.body.appendChild(greeting);
-
-      // Close button for greeting
-      const closeBtn = greeting.querySelector(".greeting-close");
-      if (closeBtn) {
-        Object.assign(closeBtn.style, {
-          position: "absolute",
-          top: "5px",
-          right: "10px",
-          cursor: "pointer",
-          fontSize: "18px",
+        // Style the greeting
+        Object.assign(greeting.style, {
+          position: "fixed",
+          bottom: "90px",
+          right: "20px",
+          maxWidth: "300px",
+          padding: "15px",
+          backgroundColor: "white",
+          borderRadius: "10px",
+          boxShadow: "0 4px 8px rgba(0,0,0,0.1)",
+          zIndex: "998",
+          transition: "all 0.3s ease",
         });
 
-        closeBtn.addEventListener("click", function (e) {
-          e.stopPropagation();
-          greeting.style.display = "none";
+        // Close button for greeting
+        const closeBtn = greeting.querySelector(".greeting-close");
+        if (closeBtn) {
+          Object.assign(closeBtn.style, {
+            position: "absolute",
+            top: "5px",
+            right: "10px",
+            cursor: "pointer",
+            fontSize: "18px",
+          });
+
+          closeBtn.addEventListener("click", function (e) {
+            e.stopPropagation();
+            greeting.classList.add("hidden");
+          });
+        }
+
+        // Also allow clicking greeting to open chatbot
+        greeting.addEventListener("click", function (e) {
+          if (
+            e.target !== greeting.querySelector(".greeting-close") &&
+            !greeting.contains(e.target)
+          ) {
+            e.preventDefault();
+            e.stopPropagation();
+            window.openChatbot();
+          }
         });
+
+        // Auto-hide greeting after 8 seconds
+        setTimeout(() => {
+          if (greeting && !greeting.classList.contains("hidden")) {
+            greeting.classList.add("hidden");
+          }
+        }, 8000);
       }
-
-      // Also allow clicking greeting to open chatbot
-      greeting.addEventListener("click", function (e) {
-        if (e.target !== closeBtn) {
-          window.openChatbot();
-        }
-      });
-
-      // Auto-hide greeting after 8 seconds
-      setTimeout(() => {
-        const greeting = document.getElementById("healthcare-ai-greeting");
-        if (greeting) {
-          greeting.classList.add("hidden");
-        }
-      }, 8000);
-
-      console.log("Greeting message created and added to the page");
     }
 
-    // Render the React ChatWidget, passing the config as a prop
-    ReactDOM.render(<ChatWidget config={config} />, container);
-    console.log("ChatWidget rendered in container");
+    // Render the React ChatWidget, spreading all userConfig entries as props
+    ReactDOM.render(<ChatWidget {...config} />, container);
   },
 };
 
 export default HealthcareAIWidget;
 
-// Make chatbot opener available globally
+// Make chatbot opener available globally with tracking
 if (typeof window !== "undefined") {
   window.openChatbot = function () {
-    console.log("Opening chatbot...");
     const chatbot = document.getElementById("chatbot");
-    const healthcareButton = document.getElementById("healthcare-ai-button");
-    const elanButton = document.getElementById("elan-ai-button");
+    const button = document.getElementById("healthcare-ai-button");
     const greeting = document.getElementById("healthcare-ai-greeting");
 
-    if (chatbot) {
-      // Remove hidden class and ensure display is block
-      chatbot.classList.remove("hidden");
-      chatbot.style.display = "block";
-      console.log("Chatbot display updated");
-
-      // Track chatbot opened
-      const userId =
-        localStorage.getItem("healthcare_user_id") ||
-        "user_" + Math.random().toString(36).substring(2, 15);
-      const sessionId =
-        localStorage.getItem("healthcare_session_id") ||
-        "session_" + Math.random().toString(36).substring(2, 15);
-
-      // Store IDs if they don't exist
-      if (!localStorage.getItem("healthcare_user_id")) {
-        localStorage.setItem("healthcare_user_id", userId);
+    // Track chatbot open event if not already tracked
+    if (chatbot && chatbot.style.display !== "block") {
+      // Create a custom event that components can listen for
+      const event = new CustomEvent("chatbotOpened", {
+        detail: { method: "global_function" },
+      });
+      document.dispatchEvent(event);
+      
+      // Send analytics event directly via WebSocket if available
+      if (window.sendAnalyticsEvent) {
+        window.sendAnalyticsEvent('chatbot_opened', { method: 'button_click' });
       }
-      localStorage.setItem("healthcare_session_id", sessionId);
-
-      console.log(
-        `Tracking chatbot opened: user=${userId}, session=${sessionId}`
-      );
-
-      // Send analytics event
-      fetch("/api/analytics/chatbot/opened", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          session_id: sessionId,
-          user_id: userId,
-        }),
-      })
-        .then((response) => {
-          if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-          }
-          return response.json();
-        })
-        .then((data) => {
-          console.log("Chatbot opened tracking response:", data);
-          // Check if tracking was successful
-          if (
-            data.verification &&
-            (!data.verification.user_exists ||
-              !data.verification.session_exists)
-          ) {
-            console.error("Tracking verification failed:", data.verification);
-            // Try again with a delay
-            setTimeout(() => {
-              fetch("/api/analytics/chatbot/opened", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  session_id: sessionId,
-                  user_id: userId,
-                }),
-              });
-            }, 1000);
-          }
-        })
-        .catch((err) => {
-          console.error("Failed to track chatbot opened:", err);
-          // Try again with a delay
-          setTimeout(() => {
-            fetch("/api/analytics/chatbot/opened", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                session_id: sessionId,
-                user_id: userId,
-              }),
-            });
-          }, 1000);
-        });
-    } else {
-      console.error("Chatbot element not found");
     }
 
-    // Hide buttons and greeting
-    if (healthcareButton) healthcareButton.style.display = "none";
-    if (elanButton) elanButton.style.display = "none";
+    if (chatbot) {
+      // First make sure it's visible (display block) before removing hidden class
+      chatbot.style.display = "block";
+      // Use requestAnimationFrame to ensure display change takes effect first
+      requestAnimationFrame(() => {
+        chatbot.classList.remove("hidden");
+      });
+    }
+
+    if (button) button.style.display = "none";
     if (greeting) greeting.style.display = "none";
   };
-
-  // Make chatbot closer available globally
-  window.closeChatbot = function () {
-    console.log("Closing chatbot...");
-    const chatbot = document.getElementById("chatbot");
-    const healthcareButton = document.getElementById("healthcare-ai-button");
-    const elanButton = document.getElementById("elan-ai-button");
-
-    if (chatbot) {
-      chatbot.classList.add("hidden");
-      // Use setTimeout to ensure the transition completes before hiding
-      setTimeout(() => {
-        chatbot.style.display = "none";
-      }, 300);
-    }
-
-    // Show the appropriate button
-    if (elanButton) {
-      elanButton.style.display = "block";
-    } else if (healthcareButton) {
-      healthcareButton.style.display = "flex";
-    }
-  };
-
-  console.log("Global chatbot functions defined");
 }
+

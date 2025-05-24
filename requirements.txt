@@ -1,7 +1,7 @@
 fastapi==0.115.9
 anyio>=4.8.0,<5.0.0
 websockets>=13.0.0,<15.1.0
-
+protobuf==6.30.2
 langchain==0.3.0
 langchain-core>=0.3.0,<0.4.0
 langchain-community>=0.3.0,<0.4.0
@@ -16,3 +16,7 @@ chromadb>=0.4.0,<0.6.0
 pandas
 uvicorn
 python-dotenv
+
+
+## pip install googleapis-common-protos google-api-core google-ai-generativelanguage grpcio-status
+

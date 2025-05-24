@@ -210,10 +210,54 @@ export const useChatSocket = (setChatHistory, setStreaming, customChatUrl) => {
     [connectWebSocket, waitForConnection, setChatHistory, setStreaming]
   );
 
+  // Add analytics tracking
+  const trackUserAction = useCallback((action, details = {}) => {
+    const userId = localStorage.getItem('healthcare_user_id') || 
+      'user_' + Math.random().toString(36).substring(2, 15);
+    const sessionId = localStorage.getItem('healthcare_session_id') || 
+      'session_' + Math.random().toString(36).substring(2, 15);
+    
+    // Store IDs if they don't exist
+    if (!localStorage.getItem('healthcare_user_id')) {
+      localStorage.setItem('healthcare_user_id', userId);
+    }
+    
+    // Always update session ID on new actions
+    localStorage.setItem('healthcare_session_id', sessionId);
+    
+    // Track analytics event
+    const analyticsData = {
+      action,
+      userId,
+      sessionId,
+      timestamp: new Date().toISOString(),
+      ...details
+    };
+    
+    // Send analytics data to server
+    if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+      ws.current.send(JSON.stringify({
+        type: 'analytics',
+        data: analyticsData
+      }));
+    } else {
+      // Queue analytics for when connection is available
+      console.log('Queuing analytics event:', analyticsData);
+    }
+  }, []);
+
   // Update chat history ref when chat history changes
   useEffect(() => {
     chatHistoryRef.current = chatHistoryRef.current || [];
-  }, []);
+    
+    // Expose the trackUserAction function globally for direct access
+    window.sendAnalyticsEvent = trackUserAction;
+    
+    return () => {
+      // Clean up global reference when component unmounts
+      window.sendAnalyticsEvent = null;
+    };
+  }, [trackUserAction]);
 
   // Connect on component mount
   useEffect(() => {
@@ -237,6 +281,9 @@ export const useChatSocket = (setChatHistory, setStreaming, customChatUrl) => {
     waitForConnection,
     sendMessage,
     connectionStatus,
+    trackUserAction
   };
 };
+
+
 
