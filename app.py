@@ -17,9 +17,12 @@ from langchain.prompts import PromptTemplate
 import json
 import time
 from collections import defaultdict
-import sqlite3
+import mysql.connector
+from mysql.connector import Error
 import json as json_lib
-from datetime import datetime
+from datetime import datetime, timedelta
+from typing import Optional, Dict, Any
+import hashlib
 
 # Load environment
 from dotenv import load_dotenv
@@ -195,121 +198,256 @@ async def query_qa(req: QueryRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# Initialize SQLite database for analytics
-def init_analytics_db():
-    conn = sqlite3.connect('analytics.db')
-    cursor = conn.cursor()
-    
-    # Create users table
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS users (
-        user_id TEXT PRIMARY KEY,
-        sessions INTEGER DEFAULT 0,
-        chatbot_opens INTEGER DEFAULT 0,
-        questions_asked INTEGER DEFAULT 0,
-        last_active TEXT,
-        created_at TEXT
-    )
-    ''')
-    
-    # Create sessions table
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS sessions (
-        session_id TEXT PRIMARY KEY,
-        user_id TEXT,
-        start_time TEXT,
-        end_time TEXT,
-        questions INTEGER DEFAULT 0,
-        FOREIGN KEY (user_id) REFERENCES users(user_id)
-    )
-    ''')
-    
-    # Create events table for detailed analytics
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS events (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id TEXT,
-        session_id TEXT,
-        event_type TEXT,
-        event_data TEXT,
-        timestamp TEXT,
-        FOREIGN KEY (user_id) REFERENCES users(user_id),
-        FOREIGN KEY (session_id) REFERENCES sessions(session_id)
-    )
-    ''')
-    
-    conn.commit()
-    conn.close()
-    print("Analytics database initialized")
+# MySQL Configuration
+MYSQL_CONFIG = {
+    'host': 'localhost',
+    'port': 3306,
+    'user': 'root',
+    'password': 'nirbhaysingh@mg1234',
+    'database': 'chatbot_analytics'
+}
 
-# Call the initialization function
-init_analytics_db()
-
-# In-memory cache for active sessions
-active_sessions = {}
-chat_histories = {}
-
-# Helper functions for database operations
 def get_db_connection():
-    conn = sqlite3.connect('analytics.db')
-    conn.row_factory = sqlite3.Row
-    return conn
+    try:
+        connection = mysql.connector.connect(**MYSQL_CONFIG)
+        if connection.is_connected():
+            return connection
+    except Error as e:
+        print(f"Error connecting to MySQL: {e}")
+        raise HTTPException(status_code=500, detail="Database connection error")
+    return None
 
-def record_user_event(user_id, session_id, event_type, event_data=None):
+def execute_query(query: str, params: tuple = None, fetch: bool = True) -> Optional[Dict[str, Any]]:
+    connection = None
+    try:
+        connection = get_db_connection()
+        cursor = connection.cursor(dictionary=True)
+        
+        if params:
+            cursor.execute(query, params)
+        else:
+            cursor.execute(query)
+            
+        if fetch:
+            result = cursor.fetchall()
+        else:
+            connection.commit()
+            result = None
+            
+        return result
+    except Error as e:
+        print(f"Error executing query: {e}")
+        if connection:
+            connection.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if connection and connection.is_connected():
+            cursor.close()
+            connection.close()
+
+def record_user_event(user_id: str, session_id: str, event_type: str, event_data: Dict = None):
     if not user_id:
         return
         
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    # Check if user exists
-    cursor.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
-    user = cursor.fetchone()
-    
     timestamp = datetime.now().isoformat()
+    page_url = event_data.get('page_url') if event_data else None
     
-    if not user:
-        # Create new user
-        cursor.execute(
-            "INSERT INTO users (user_id, sessions, chatbot_opens, questions_asked, last_active, created_at) VALUES (?, 0, 0, 0, ?, ?)",
-            (user_id, timestamp, timestamp)
+    try:
+        # Check if user exists
+        user = execute_query(
+            "SELECT * FROM users WHERE user_id = %s",
+            (user_id,)
         )
-    
-    # Update user stats based on event type
-    if event_type == "session_start":
-        cursor.execute("UPDATE users SET sessions = sessions + 1, last_active = ? WHERE user_id = ?", 
-                      (timestamp, user_id))
         
-        # Record session
-        cursor.execute(
-            "INSERT INTO sessions (session_id, user_id, start_time, questions) VALUES (?, ?, ?, 0)",
-            (session_id, user_id, timestamp)
-        )
-    elif event_type == "chatbot_opened":
-        cursor.execute("UPDATE users SET chatbot_opens = chatbot_opens + 1, last_active = ? WHERE user_id = ?", 
-                      (timestamp, user_id))
-    elif event_type == "question_asked":
-        cursor.execute("UPDATE users SET questions_asked = questions_asked + 1, last_active = ? WHERE user_id = ?", 
-                      (timestamp, user_id))
+        if not user:
+            # Create new user
+            execute_query(
+                """
+                INSERT INTO users 
+                (user_id, first_seen_at, last_active_at, is_active) 
+                VALUES (%s, %s, %s, TRUE)
+                """,
+                (user_id, timestamp, timestamp),
+                fetch=False
+            )
         
-        # Update session question count
-        cursor.execute("UPDATE sessions SET questions = questions + 1 WHERE session_id = ?", 
-                      (session_id,))
-    elif event_type == "session_end":
-        cursor.execute("UPDATE sessions SET end_time = ? WHERE session_id = ?", 
-                      (timestamp, session_id))
-    
-    # Record the event with details
-    event_data_json = json_lib.dumps(event_data) if event_data else None
-    cursor.execute(
-        "INSERT INTO events (user_id, session_id, event_type, event_data, timestamp) VALUES (?, ?, ?, ?, ?)",
-        (user_id, session_id, event_type, event_data_json, timestamp)
-    )
-    
-    conn.commit()
-    conn.close()
+        # Update user stats based on event type
+        if event_type == "session_start":
+            execute_query(
+                """
+                UPDATE users 
+                SET total_sessions = total_sessions + 1,
+                    last_active_at = %s,
+                    is_active = TRUE,
+                    last_page_url = %s
+                WHERE user_id = %s
+                """,
+                (timestamp, page_url, user_id),
+                fetch=False
+            )
+            
+            # Record session
+            execute_query(
+                """
+                INSERT INTO sessions 
+                (session_id, user_id, start_time, page_url, message_count, status) 
+                VALUES (%s, %s, %s, %s, 0, 'active')
+                """,
+                (session_id, user_id, timestamp, page_url),
+                fetch=False
+            )
+            
+            # Create a new conversation for this session
+            conversation_id = str(uuid.uuid4())
+            execute_query(
+                """
+                INSERT INTO conversations 
+                (conversation_id, session_id, user_id, start_time, status)
+                VALUES (%s, %s, %s, %s, 'active')
+                """,
+                (conversation_id, session_id, user_id, timestamp),
+                fetch=False
+            )
+                
+            # Record the session start event
+            execute_query(
+                """
+                INSERT INTO messages 
+                (message_id, conversation_id, user_id, message_type, content, timestamp)
+                VALUES (UUID(), %s, %s, 'system', %s, %s)
+                """,
+                (conversation_id, user_id, json_lib.dumps({"event": "session_start"}), timestamp),
+                fetch=False
+            )
+            
+        elif event_type == "question_asked":
+            # Get the active conversation for this session
+            conversation = execute_query(
+                """
+                SELECT conversation_id 
+                FROM conversations 
+                WHERE session_id = %s AND status = 'active'
+                ORDER BY start_time DESC LIMIT 1
+                """,
+                (session_id,)
+            )
+            
+            if conversation:
+                conversation_id = conversation[0]['conversation_id']
+                
+                # Record the user's question
+                execute_query(
+                    """
+                    INSERT INTO messages 
+                    (message_id, conversation_id, user_id, message_type, content, timestamp)
+                    VALUES (UUID(), %s, %s, 'user', %s, %s)
+                    """,
+                    (conversation_id, user_id, json_lib.dumps(event_data), timestamp),
+                    fetch=False
+                )
+                
+                # Update user message count
+                execute_query(
+                    """
+                    UPDATE users 
+                    SET total_messages = total_messages + 1,
+                        last_active_at = %s
+                    WHERE user_id = %s
+                    """,
+                    (timestamp, user_id),
+                    fetch=False
+                )
+            
+        elif event_type == "bot_response":
+            # Get the active conversation
+            conversation = execute_query(
+                """
+                SELECT conversation_id 
+                FROM conversations 
+                WHERE session_id = %s AND status = 'active'
+                ORDER BY start_time DESC LIMIT 1
+                """,
+                (session_id,)
+            )
+            
+            if conversation:
+                conversation_id = conversation[0]['conversation_id']
+                
+                # Record the bot's response
+                execute_query(
+                    """
+                    INSERT INTO messages 
+                    (message_id, conversation_id, user_id, message_type, content, timestamp)
+                    VALUES (UUID(), %s, %s, 'bot', %s, %s)
+                    """,
+                    (conversation_id, user_id, json_lib.dumps(event_data), timestamp),
+                    fetch=False
+                )
+            
+        elif event_type == "session_end":
+            # Get the active conversation
+            conversation = execute_query(
+                """
+                SELECT conversation_id 
+                FROM conversations 
+                WHERE session_id = %s AND status = 'active'
+                ORDER BY start_time DESC LIMIT 1
+                """,
+                (session_id,)
+            )
+            
+            if conversation:
+                conversation_id = conversation[0]['conversation_id']
+                
+                # Update conversation status
+                execute_query(
+                    """
+                    UPDATE conversations 
+                    SET end_time = %s,
+                        status = 'completed',
+                        duration = TIMESTAMPDIFF(SECOND, start_time, %s)
+                    WHERE conversation_id = %s
+                    """,
+                    (timestamp, timestamp, conversation_id),
+                    fetch=False
+                )
+                
+                # Record the session end event
+                execute_query(
+                    """
+                    INSERT INTO messages 
+                    (message_id, conversation_id, user_id, message_type, content, timestamp)
+                    VALUES (UUID(), %s, %s, 'system', %s, %s)
+                    """,
+                    (conversation_id, user_id, json_lib.dumps({"event": "session_end"}), timestamp),
+                    fetch=False
+                )
+            
+            # Update user status
+            execute_query(
+                """
+                UPDATE users 
+                SET is_active = FALSE
+                WHERE user_id = %s
+                """,
+                (user_id,),
+                fetch=False
+            )
+        
+    except Error as e:
+        print(f"Error recording user event: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-# WebSocket endpoint at /ws
+def generate_short_id():
+    """Generate a shorter, more readable ID"""
+    return hashlib.md5(str(uuid.uuid4()).encode()).hexdigest()[:8]
+
+def generate_user_id():
+    """Generate a meaningful user ID"""
+    timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
+    random_part = hashlib.md5(str(uuid.uuid4()).encode()).hexdigest()[:4]
+    return f"user_{timestamp}_{random_part}"
+
 @app.websocket("/ws")
 async def websocket_endpoint_ws(websocket: WebSocket):
     try:
@@ -318,56 +456,99 @@ async def websocket_endpoint_ws(websocket: WebSocket):
         print("WebSocket connection accepted")
         
         # Create a unique session ID for this WebSocket connection
-        session_id = str(uuid.uuid4())
-        user_id = None
+        session_id = generate_short_id()
+        user_id = generate_user_id()  # Generate a meaningful user ID
+        session_start_time = datetime.now()
         chat_histories[session_id] = []
-        print(f"Created new session: {session_id}")
+        print(f"Created new session: {session_id} for user: {user_id}")
+        
+        # Get client info
+        client = websocket.client
+        page_url = "unknown"  # Default value
+        
+        # Record session start
+        record_user_event(
+            user_id=user_id,
+            session_id=session_id,
+            event_type="session_start",
+            event_data={
+                "page_url": page_url,
+                "timestamp": session_start_time.isoformat(),
+                "connection_type": "websocket",
+                "client_info": {
+                    "host": client.host if hasattr(client, 'host') else 'unknown',
+                    "port": client.port if hasattr(client, 'port') else 'unknown'
+                }
+            }
+        )
         
         while True:
             try:
                 # Receive message from client
                 data = await websocket.receive_text()
-                print(f"Received message from client: {data[:100]}...")  # Log first 100 chars
+                print(f"Received message from client: {data[:100]}...")
                 message = json.loads(data)
                 
-                # Extract user_id from message
-                if "user_id" in message:
-                    user_id = message["user_id"]
+                # Update page URL if provided in the message
+                if "page_url" in message:
+                    page_url = message["page_url"]
+                    # Update session with page URL
+                    execute_query(
+                        """
+                        UPDATE sessions 
+                        SET page_url = %s 
+                        WHERE session_id = %s
+                        """,
+                        (page_url, session_id),
+                        fetch=False
+                    )
                 
-                # Handle analytics events
-                if "type" in message and message["type"] == "analytics":
-                    analytics_data = message["data"]
-                    event_user_id = analytics_data.get("userId", user_id)
-                    event_session_id = analytics_data.get("sessionId", session_id)
+                # Extract user_id from message if provided
+                if "user_id" in message and message["user_id"]:
+                    new_user_id = message["user_id"]
+                    # Update the session with the real user ID
+                    execute_query(
+                        """
+                        UPDATE sessions 
+                        SET user_id = %s 
+                        WHERE session_id = %s
+                        """,
+                        (new_user_id, session_id),
+                        fetch=False
+                    )
                     
-                    if event_user_id:
-                        # Record the event in the database
-                        action = analytics_data.get("action")
-                        print(f"Recording analytics event: {action} for user {event_user_id}")
-                        record_user_event(
-                            event_user_id, 
-                            event_session_id, 
-                            action, 
-                            analytics_data
-                        )
-                        print(f"Recorded {action} event for user {event_user_id}")
-                        
-                        # Send confirmation back to client
-                        await websocket.send_json({
-                            "type": "analytics_confirmation",
-                            "event": action,
-                            "status": "recorded"
-                        })
-                        continue
+                    # Record user identification
+                    record_user_event(
+                        new_user_id,
+                        session_id,
+                        "user_identified",
+                        {
+                            "timestamp": datetime.now().isoformat(),
+                            "previous_id": user_id
+                        }
+                    )
+                    user_id = new_user_id
                 
                 # Process the message
                 if "user_input" in message:
+                    message_start_time = datetime.now()
                     print(f"Processing user input: {message['user_input'][:50]}...")
+                    
+                    # Record the user's question
+                    record_user_event(
+                        user_id,
+                        session_id,
+                        "question_asked",
+                        {
+                            "question": message["user_input"],
+                            "timestamp": message_start_time.isoformat(),
+                            "chat_history_length": len(chat_histories[session_id])
+                        }
+                    )
                     
                     # Get chat history from message
                     chat_history = message.get("chat_history", [])
                     if chat_history:
-                        # Convert the chat history to the format expected by the chain
                         formatted_history = [(msg["content"], "") for msg in chat_history if msg["role"] == "user"]
                         chat_histories[session_id] = formatted_history
                     
@@ -389,9 +570,35 @@ async def websocket_endpoint_ws(websocket: WebSocket):
                             "chat_history": chat_histories[session_id]
                         })
                         answer = result["answer"]
+                        response_time = (datetime.now() - message_start_time).total_seconds()
+                        
+                        # Record the bot's response
+                        record_user_event(
+                            user_id,
+                            session_id,
+                            "bot_response",
+                            {
+                                "response": answer,
+                                "timestamp": datetime.now().isoformat(),
+                                "sources": [doc.metadata["source"] for doc in result.get("source_documents", [])],
+                                "response_time": response_time
+                            }
+                        )
                         
                         # Update chat history
                         chat_histories[session_id].append((message["user_input"], answer))
+                        
+                        # Update message count in sessions table (count each interaction as 1)
+                        execute_query(
+                            """
+                            UPDATE sessions 
+                            SET message_count = message_count + 1,
+                                last_message_time = %s
+                            WHERE session_id = %s
+                            """,
+                            (datetime.now().isoformat(), session_id),
+                            fetch=False
+                        )
                         
                         # Limit chat history length
                         if len(chat_histories[session_id]) > 10:
@@ -413,17 +620,65 @@ async def websocket_endpoint_ws(websocket: WebSocket):
                     except Exception as e:
                         error_msg = f"Error processing request: {str(e)}"
                         print(error_msg)
+                        
+                        # Record error event
+                        record_user_event(
+                            user_id,
+                            session_id,
+                            "error",
+                            {
+                                "error": str(e),
+                                "timestamp": datetime.now().isoformat(),
+                                "question": message["user_input"]
+                            }
+                        )
+                        
                         await websocket.send_json({
                             "error": error_msg,
                             "done": True
                         })
             except WebSocketDisconnect:
                 print(f"WebSocket disconnected for session {session_id}")
-                if user_id:
-                    record_user_event(user_id, session_id, "session_end")
+                session_end_time = datetime.now()
+                session_duration = (session_end_time - session_start_time).total_seconds()
+                
+                # Update session with end time and duration
+                execute_query(
+                    """
+                    UPDATE sessions 
+                    SET end_time = %s,
+                        duration = %s,
+                        status = 'completed'
+                    WHERE session_id = %s
+                    """,
+                    (session_end_time.isoformat(), session_duration, session_id),
+                    fetch=False
+                )
+                
+                record_user_event(
+                    user_id,
+                    session_id,
+                    "session_end",
+                    {
+                        "timestamp": session_end_time.isoformat(),
+                        "total_messages": len(chat_histories[session_id]),
+                        "duration": session_duration
+                    }
+                )
                 break
             except Exception as e:
                 print(f"Error in WebSocket loop: {str(e)}")
+                if user_id:
+                    record_user_event(
+                        user_id,
+                        session_id,
+                        "error",
+                        {
+                            "error": str(e),
+                            "timestamp": datetime.now().isoformat(),
+                            "type": "websocket_error"
+                        }
+                    )
                 await websocket.send_json({
                     "error": f"Internal server error: {str(e)}",
                     "done": True
@@ -448,121 +703,390 @@ async def websocket_endpoint_chat(websocket: WebSocket):
 # Update analytics endpoints to use the database
 @app.get("/analytics")
 async def get_analytics():
-    conn = get_db_connection()
-    
-    # Get total users
-    total_users = conn.execute("SELECT COUNT(*) as count FROM users").fetchone()["count"]
-    
-    # Get total sessions
-    total_sessions = conn.execute("SELECT SUM(sessions) as count FROM users").fetchone()["count"] or 0
-    
-    # Get total questions
-    total_questions = conn.execute("SELECT SUM(questions_asked) as count FROM users").fetchone()["count"] or 0
-    
-    # Get total chatbot opens
-    total_opens = conn.execute("SELECT SUM(chatbot_opens) as count FROM users").fetchone()["count"] or 0
-    
-    # Get all users with their stats
-    users = conn.execute("SELECT * FROM users").fetchall()
-    users_data = {}
-    
-    for user in users:
-        user_id = user["user_id"]
+    try:
+        # Get total users
+        total_users = execute_query("SELECT COUNT(*) as count FROM users")[0]['count']
+        
+        # Get total sessions
+        total_sessions = execute_query("SELECT SUM(total_sessions) as count FROM users")[0]['count'] or 0
+        
+        # Get total questions
+        total_questions = execute_query("SELECT SUM(total_messages) as count FROM users")[0]['count'] or 0
+        
+        # Get total chatbot opens
+        total_opens = execute_query("SELECT COUNT(*) as count FROM users WHERE total_sessions > 0")[0]['count'] or 0
+        
+        # Get all users with their stats
+        users = execute_query("""
+            SELECT 
+                u.*,
+                COUNT(DISTINCT s.session_id) as session_count,
+                AVG(s.duration) as avg_session_duration
+            FROM users u
+            LEFT JOIN sessions s ON u.user_id = s.user_id
+            GROUP BY u.user_id
+        """)
+        
+        users_data = {}
+        for user in users:
+            user_id = user['user_id']
+            # Get user's sessions
+            sessions = execute_query("""
+                SELECT 
+                    s.*,
+                    COUNT(m.message_id) as message_count
+                FROM sessions s
+                LEFT JOIN messages m ON s.session_id = m.conversation_id
+                WHERE s.user_id = %s
+                GROUP BY s.session_id
+                ORDER BY s.start_time DESC
+            """, (user_id,))
+            
+            sessions_data = []
+            for session in sessions:
+                # Get events for this session
+                events = execute_query("""
+                    SELECT 
+                        message_type as type,
+                        timestamp,
+                        content as data
+                    FROM messages 
+                    WHERE conversation_id = %s
+                    ORDER BY timestamp
+                """, (session['session_id'],))
+                
+                events_data = []
+                for event in events:
+                    event_data = None
+                    if event['data']:
+                        try:
+                            event_data = json_lib.loads(event['data'])
+                        except:
+                            event_data = event['data']
+                            
+                    events_data.append({
+                        "type": event['type'],
+                        "timestamp": event['timestamp'],
+                        "data": event_data
+                    })
+                
+                sessions_data.append({
+                    "session_id": session['session_id'],
+                    "start_time": session['start_time'],
+                    "end_time": session['end_time'],
+                    "duration": session['duration'],
+                    "message_count": session['message_count'],
+                    "events": events_data
+                })
+            
+            users_data[user_id] = {
+                "sessions": user['total_sessions'],
+                "total_messages": user['total_messages'],
+                "total_duration": user['total_duration'],
+                "last_active": user['last_active_at'],
+                "created_at": user['first_seen_at'],
+                "is_active": user['is_active'],
+                "session_history": sessions_data
+            }
+        
+        return {
+            "total_users": total_users,
+            "total_sessions": total_sessions,
+            "total_questions": total_questions,
+            "total_chatbot_opens": total_opens,
+            "users": users_data
+        }
+    except Error as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/analytics/sessions", tags=["analytics"])
+async def get_session_analytics():
+    try:
+        # Get active sessions
+        active_sessions = execute_query("""
+            SELECT COUNT(*) as active_count 
+            FROM sessions 
+            WHERE status = 'active'
+        """)[0]['active_count']
+
+        # Get total sessions today
+        today_sessions = execute_query("""
+            SELECT COUNT(*) as today_count 
+            FROM sessions 
+            WHERE DATE(start_time) = CURDATE()
+        """)[0]['today_count']
+
+        # Get average session duration
+        avg_duration = execute_query("""
+            SELECT AVG(duration) as avg_duration 
+            FROM sessions 
+            WHERE duration > 0
+        """)[0]['avg_duration']
+
+        # Get recent sessions with details
+        recent_sessions = execute_query("""
+            SELECT 
+                s.session_id,
+                s.user_id,
+                s.start_time,
+                s.duration,
+                s.page_url,
+                s.message_count,
+                s.status
+            FROM sessions s
+            ORDER BY s.start_time DESC
+            LIMIT 10
+        """)
+
+        return {
+            "active_sessions": active_sessions or 0,
+            "today_sessions": today_sessions or 0,
+            "average_duration": round(avg_duration, 2) if avg_duration else 0,
+            "recent_sessions": recent_sessions or []
+        }
+    except Error as e:
+        print(f"Error in session analytics: {str(e)}")
+        return {
+            "active_sessions": 0,
+            "today_sessions": 0,
+            "average_duration": 0,
+            "recent_sessions": []
+        }
+
+@app.get("/analytics/conversations", tags=["analytics"])
+async def get_conversation_analytics():
+    try:
+        # Get conversation statistics
+        stats = execute_query("""
+            SELECT 
+                COUNT(*) as total_conversations,
+                COUNT(CASE WHEN status = 'active' THEN 1 END) as active_conversations,
+                COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed_conversations,
+                COUNT(CASE WHEN status = 'handover' THEN 1 END) as handover_conversations,
+                AVG(duration) as avg_duration
+            FROM conversations
+        """)[0]
+
+        # Get recent conversations with message counts
+        recent_conversations = execute_query("""
+            SELECT 
+                c.conversation_id,
+                c.user_id,
+                c.start_time,
+                c.duration,
+                c.status,
+                COUNT(m.message_id) as message_count
+            FROM conversations c
+            LEFT JOIN messages m ON c.conversation_id = m.conversation_id
+            GROUP BY c.conversation_id
+            ORDER BY c.start_time DESC
+            LIMIT 10
+        """)
+
+        return {
+            "total_conversations": stats['total_conversations'] or 0,
+            "active_conversations": stats['active_conversations'] or 0,
+            "completed_conversations": stats['completed_conversations'] or 0,
+            "handover_conversations": stats['handover_conversations'] or 0,
+            "average_duration": round(stats['avg_duration'], 2) if stats['avg_duration'] else 0,
+            "recent_conversations": recent_conversations or []
+        }
+    except Error as e:
+        print(f"Error in conversation analytics: {str(e)}")
+        return {
+            "total_conversations": 0,
+            "active_conversations": 0,
+            "completed_conversations": 0,
+            "handover_conversations": 0,
+            "average_duration": 0,
+            "recent_conversations": []
+        }
+
+@app.get("/analytics/messages", tags=["analytics"])
+async def get_message_analytics():
+    try:
+        # Get message statistics
+        stats = execute_query("""
+            SELECT 
+                COUNT(*) as total_messages,
+                COUNT(CASE WHEN message_type = 'user' THEN 1 END) as user_messages,
+                COUNT(CASE WHEN message_type = 'bot' THEN 1 END) as bot_messages,
+                COUNT(CASE WHEN message_type = 'system' THEN 1 END) as system_messages
+            FROM messages
+        """)[0]
+
+        # Get recent messages with details
+        recent_messages = execute_query("""
+            SELECT 
+                m.message_id,
+                m.conversation_id,
+                m.user_id,
+                m.message_type,
+                m.content,
+                m.timestamp
+            FROM messages m
+            ORDER BY m.timestamp DESC
+            LIMIT 20
+        """)
+
+        return {
+            "total_messages": stats['total_messages'] or 0,
+            "user_messages": stats['user_messages'] or 0,
+            "bot_messages": stats['bot_messages'] or 0,
+            "system_messages": stats['system_messages'] or 0,
+            "recent_messages": recent_messages or []
+        }
+    except Error as e:
+        print(f"Error in message analytics: {str(e)}")
+        return {
+            "total_messages": 0,
+            "user_messages": 0,
+            "bot_messages": 0,
+            "system_messages": 0,
+            "recent_messages": []
+        }
+
+@app.get("/analytics/users", tags=["analytics"])
+async def get_user_analytics():
+    try:
+        # Get user statistics
+        stats = execute_query("""
+            SELECT 
+                COUNT(*) as total_users,
+                COUNT(CASE WHEN is_active = TRUE THEN 1 END) as active_users,
+                COUNT(CASE WHEN user_type = 'new' THEN 1 END) as new_users,
+                COUNT(CASE WHEN user_type = 'returning' THEN 1 END) as returning_users,
+                AVG(total_sessions) as avg_sessions_per_user,
+                AVG(total_messages) as avg_messages_per_user
+            FROM users
+        """)[0]
+
+        # Get recent active users
+        recent_users = execute_query("""
+            SELECT 
+                user_id,
+                first_seen_at,
+                last_active_at,
+                total_sessions,
+                total_messages,
+                is_active,
+                user_type
+            FROM users
+            ORDER BY last_active_at DESC
+            LIMIT 10
+        """)
+
+        return {
+            "total_users": stats['total_users'] or 0,
+            "active_users": stats['active_users'] or 0,
+            "new_users": stats['new_users'] or 0,
+            "returning_users": stats['returning_users'] or 0,
+            "average_sessions_per_user": round(stats['avg_sessions_per_user'], 2) if stats['avg_sessions_per_user'] else 0,
+            "average_messages_per_user": round(stats['avg_messages_per_user'], 2) if stats['avg_messages_per_user'] else 0,
+            "recent_users": recent_users or []
+        }
+    except Error as e:
+        print(f"Error in user analytics: {str(e)}")
+        return {
+            "total_users": 0,
+            "active_users": 0,
+            "new_users": 0,
+            "returning_users": 0,
+            "average_sessions_per_user": 0,
+            "average_messages_per_user": 0,
+            "recent_users": []
+        }
+
+# Parameterized routes after specific routes
+@app.get("/analytics/user/{user_id}", tags=["analytics"])
+async def get_user_analytics_by_id(user_id: str):
+    try:
+        # Get user data
+        user = execute_query("""
+            SELECT 
+                u.*,
+                COUNT(DISTINCT s.session_id) as session_count,
+                AVG(s.duration) as avg_session_duration
+            FROM users u
+            LEFT JOIN sessions s ON u.user_id = s.user_id
+            WHERE u.user_id = %s
+            GROUP BY u.user_id
+        """, (user_id,))
+        
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        user = user[0]
+        
         # Get user's sessions
-        sessions = conn.execute(
-            "SELECT * FROM sessions WHERE user_id = ? ORDER BY start_time DESC", 
-            (user_id,)
-        ).fetchall()
+        sessions = execute_query("""
+            SELECT 
+                s.*,
+                COUNT(m.message_id) as message_count
+            FROM sessions s
+            LEFT JOIN messages m ON s.session_id = m.conversation_id
+            WHERE s.user_id = %s
+            GROUP BY s.session_id
+            ORDER BY s.start_time DESC
+        """, (user_id,))
         
         sessions_data = []
         for session in sessions:
+            # Get events for this session
+            events = execute_query("""
+                SELECT 
+                    message_type as type,
+                    timestamp,
+                    content as data
+                FROM messages 
+                WHERE conversation_id = %s
+                ORDER BY timestamp
+            """, (session['session_id'],))
+            
+            events_data = []
+            for event in events:
+                event_data = None
+                if event['data']:
+                    try:
+                        event_data = json_lib.loads(event['data'])
+                    except:
+                        event_data = event['data']
+                        
+                events_data.append({
+                    "type": event['type'],
+                    "timestamp": event['timestamp'],
+                    "data": event_data
+                })
+            
             sessions_data.append({
-                "session_id": session["session_id"],
-                "start_time": session["start_time"],
-                "end_time": session["end_time"],
-                "questions": session["questions"]
+                "session_id": session['session_id'],
+                "start_time": session['start_time'],
+                "end_time": session['end_time'],
+                "duration": session['duration'],
+                "message_count": session['message_count'],
+                "events": events_data
             })
         
-        users_data[user_id] = {
-            "sessions": user["sessions"],
-            "chatbot_opens": user["chatbot_opens"],
-            "questions_asked": user["questions_asked"],
-            "last_active": user["last_active"],
-            "created_at": user["created_at"],
+        user_data = {
+            "user_id": user['user_id'],
+            "sessions": user['total_sessions'],
+            "total_messages": user['total_messages'],
+            "total_duration": user['total_duration'],
+            "last_active": user['last_active_at'],
+            "created_at": user['first_seen_at'],
+            "is_active": user['is_active'],
+            "avg_session_duration": user['avg_session_duration'],
             "session_history": sessions_data
         }
-    
-    conn.close()
-    
-    return {
-        "total_users": total_users,
-        "total_sessions": total_sessions,
-        "total_questions": total_questions,
-        "total_chatbot_opens": total_opens,
-        "users": users_data
-    }
+        
+        return user_data
+    except Error as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/analytics/{user_id}")
-async def get_user_analytics(user_id: str):
-    conn = get_db_connection()
-    
-    # Get user data
-    user = conn.execute("SELECT * FROM users WHERE user_id = ?", (user_id,)).fetchone()
-    
-    if not user:
-        conn.close()
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    # Get user's sessions
-    sessions = conn.execute(
-        "SELECT * FROM sessions WHERE user_id = ? ORDER BY start_time DESC", 
-        (user_id,)
-    ).fetchall()
-    
-    sessions_data = []
-    for session in sessions:
-        # Get events for this session
-        events = conn.execute(
-            "SELECT * FROM events WHERE session_id = ? ORDER BY timestamp", 
-            (session["session_id"],)
-        ).fetchall()
-        
-        events_data = []
-        for event in events:
-            event_data = None
-            if event["event_data"]:
-                try:
-                    event_data = json_lib.loads(event["event_data"])
-                except:
-                    event_data = event["event_data"]
-                    
-            events_data.append({
-                "type": event["event_type"],
-                "timestamp": event["timestamp"],
-                "data": event_data
-            })
-        
-        sessions_data.append({
-            "session_id": session["session_id"],
-            "start_time": session["start_time"],
-            "end_time": session["end_time"],
-            "questions": session["questions"],
-            "events": events_data
-        })
-    
-    user_data = {
-        "user_id": user["user_id"],
-        "sessions": user["sessions"],
-        "chatbot_opens": user["chatbot_opens"],
-        "questions_asked": user["questions_asked"],
-        "last_active": user["last_active"],
-        "created_at": user["created_at"],
-        "session_history": sessions_data
-    }
-    
-    conn.close()
-    
-    return user_data
+# Add a root endpoint for testing
+@app.get("/")
+async def root():
+    return {"message": "API is running"}
 
 class Person:
     def __init__(self, name, age):
@@ -571,6 +1095,45 @@ class Person:
 
     def greet(self):
         print("Hello my name is {self,name} and age is ")
+
+# Update the sessions table schema
+def update_sessions_table():
+    try:
+        # Check if columns exist first
+        columns = execute_query("""
+            SELECT COLUMN_NAME 
+            FROM INFORMATION_SCHEMA.COLUMNS 
+            WHERE TABLE_NAME = 'sessions' 
+            AND TABLE_SCHEMA = DATABASE()
+        """)
+        existing_columns = [col['COLUMN_NAME'] for col in columns]
+
+        # Add columns if they don't exist
+        if 'message_count' not in existing_columns:
+            execute_query("""
+                ALTER TABLE sessions
+                ADD COLUMN message_count INT DEFAULT 0
+            """, fetch=False)
+
+        if 'last_message_time' not in existing_columns:
+            execute_query("""
+                ALTER TABLE sessions
+                ADD COLUMN last_message_time DATETIME
+            """, fetch=False)
+
+        if 'status' not in existing_columns:
+            execute_query("""
+                ALTER TABLE sessions
+                ADD COLUMN status ENUM('active', 'completed', 'error') DEFAULT 'active'
+            """, fetch=False)
+
+        print("Sessions table schema updated successfully")
+    except Error as e:
+        print(f"Error updating sessions table: {e}")
+        # Don't raise HTTPException here as this is a startup function
+
+# Call this when the app starts
+update_sessions_table()
 
 if __name__ == "__main__":
     import uvicorn
