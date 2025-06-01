@@ -564,6 +564,14 @@ async def get_user_analytics(user_id: str):
     
     return user_data
 
+class Person:
+    def __init__(self, name, age):
+        self.name = name
+        self.age = age
+
+    def greet(self):
+        print("Hello my name is {self,name} and age is ")
+
 if __name__ == "__main__":
     import uvicorn
     print("Starting server on http://0.0.0.0:8000")

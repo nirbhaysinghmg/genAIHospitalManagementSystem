@@ -149,7 +149,6 @@ const ChatWidget = ({ config: userConfig }) => {
       // Still send the message to get AI response
     }
 
-    // Send message via WebSocket
     sendMessage({
       user_input: text,
     });

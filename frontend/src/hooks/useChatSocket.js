@@ -11,7 +11,7 @@ export const useChatSocket = (setChatHistory, setStreaming, customChatUrl) => {
   const chatHistoryRef = useRef([]);
 
   // Use the provided URL or fall back to default
-  const chatUrl = customChatUrl || "ws://localhost:8000/ws";
+  const chatUrl = customChatUrl;
 
   // Wait for the WebSocket to be open
   const waitForConnection = useCallback((timeout = 5000, interval = 500) => {
@@ -34,7 +34,6 @@ export const useChatSocket = (setChatHistory, setStreaming, customChatUrl) => {
   const connectWebSocket = useCallback(() => {
     console.log(
       "Attempting to connect WebSocket to:",
-      chatUrl,
       "(Retry:",
       retryCount.current,
       ")"
@@ -146,17 +145,19 @@ export const useChatSocket = (setChatHistory, setStreaming, customChatUrl) => {
         waitForConnection()
           .then(() => {
             console.log("Connection established, sending message");
-            const userId = localStorage.getItem('healthcare_user_id') || 
-              'user_' + Math.random().toString(36).substring(2, 15);
-            const sessionId = localStorage.getItem('healthcare_session_id') || 
-              'session_' + Math.random().toString(36).substring(2, 15);
-            
+            const userId =
+              localStorage.getItem("healthcare_user_id") ||
+              "user_" + Math.random().toString(36).substring(2, 15);
+            const sessionId =
+              localStorage.getItem("healthcare_session_id") ||
+              "session_" + Math.random().toString(36).substring(2, 15);
+
             // Store IDs if they don't exist
-            if (!localStorage.getItem('healthcare_user_id')) {
-              localStorage.setItem('healthcare_user_id', userId);
+            if (!localStorage.getItem("healthcare_user_id")) {
+              localStorage.setItem("healthcare_user_id", userId);
             }
-            localStorage.setItem('healthcare_session_id', sessionId);
-            
+            localStorage.setItem("healthcare_session_id", sessionId);
+
             const formattedMessage = {
               user_input: message.user_input || message,
               chat_history: chatHistoryRef.current.map((msg) => ({
@@ -164,7 +165,7 @@ export const useChatSocket = (setChatHistory, setStreaming, customChatUrl) => {
                 content: msg.text,
               })),
               user_id: userId,
-              session_id: sessionId
+              session_id: sessionId,
             };
             console.log("Sending message:", formattedMessage);
             ws.current.send(JSON.stringify(formattedMessage));
@@ -183,17 +184,19 @@ export const useChatSocket = (setChatHistory, setStreaming, customChatUrl) => {
           });
       } else {
         console.log("Sending message via WebSocket");
-        const userId = localStorage.getItem('healthcare_user_id') || 
-          'user_' + Math.random().toString(36).substring(2, 15);
-        const sessionId = localStorage.getItem('healthcare_session_id') || 
-          'session_' + Math.random().toString(36).substring(2, 15);
-        
+        const userId =
+          localStorage.getItem("healthcare_user_id") ||
+          "user_" + Math.random().toString(36).substring(2, 15);
+        const sessionId =
+          localStorage.getItem("healthcare_session_id") ||
+          "session_" + Math.random().toString(36).substring(2, 15);
+
         // Store IDs if they don't exist
-        if (!localStorage.getItem('healthcare_user_id')) {
-          localStorage.setItem('healthcare_user_id', userId);
+        if (!localStorage.getItem("healthcare_user_id")) {
+          localStorage.setItem("healthcare_user_id", userId);
         }
-        localStorage.setItem('healthcare_session_id', sessionId);
-        
+        localStorage.setItem("healthcare_session_id", sessionId);
+
         const formattedMessage = {
           user_input: message.user_input || message,
           chat_history: chatHistoryRef.current.map((msg) => ({
@@ -201,7 +204,7 @@ export const useChatSocket = (setChatHistory, setStreaming, customChatUrl) => {
             content: msg.text,
           })),
           user_id: userId,
-          session_id: sessionId
+          session_id: sessionId,
         };
         console.log("Sending message:", formattedMessage);
         ws.current.send(JSON.stringify(formattedMessage));
@@ -212,47 +215,51 @@ export const useChatSocket = (setChatHistory, setStreaming, customChatUrl) => {
 
   // Add analytics tracking
   const trackUserAction = useCallback((action, details = {}) => {
-    const userId = localStorage.getItem('healthcare_user_id') || 
-      'user_' + Math.random().toString(36).substring(2, 15);
-    const sessionId = localStorage.getItem('healthcare_session_id') || 
-      'session_' + Math.random().toString(36).substring(2, 15);
-    
+    const userId =
+      localStorage.getItem("healthcare_user_id") ||
+      "user_" + Math.random().toString(36).substring(2, 15);
+    const sessionId =
+      localStorage.getItem("healthcare_session_id") ||
+      "session_" + Math.random().toString(36).substring(2, 15);
+
     // Store IDs if they don't exist
-    if (!localStorage.getItem('healthcare_user_id')) {
-      localStorage.setItem('healthcare_user_id', userId);
+    if (!localStorage.getItem("healthcare_user_id")) {
+      localStorage.setItem("healthcare_user_id", userId);
     }
-    
+
     // Always update session ID on new actions
-    localStorage.setItem('healthcare_session_id', sessionId);
-    
+    localStorage.setItem("healthcare_session_id", sessionId);
+
     // Track analytics event
     const analyticsData = {
       action,
       userId,
       sessionId,
       timestamp: new Date().toISOString(),
-      ...details
+      ...details,
     };
-    
+
     // Send analytics data to server
     if (ws.current && ws.current.readyState === WebSocket.OPEN) {
-      ws.current.send(JSON.stringify({
-        type: 'analytics',
-        data: analyticsData
-      }));
+      ws.current.send(
+        JSON.stringify({
+          type: "analytics",
+          data: analyticsData,
+        })
+      );
     } else {
       // Queue analytics for when connection is available
-      console.log('Queuing analytics event:', analyticsData);
+      console.log("Queuing analytics event:", analyticsData);
     }
   }, []);
 
   // Update chat history ref when chat history changes
   useEffect(() => {
     chatHistoryRef.current = chatHistoryRef.current || [];
-    
+
     // Expose the trackUserAction function globally for direct access
     window.sendAnalyticsEvent = trackUserAction;
-    
+
     return () => {
       // Clean up global reference when component unmounts
       window.sendAnalyticsEvent = null;
@@ -281,9 +288,6 @@ export const useChatSocket = (setChatHistory, setStreaming, customChatUrl) => {
     waitForConnection,
     sendMessage,
     connectionStatus,
-    trackUserAction
+    trackUserAction,
   };
 };
-
-
-
