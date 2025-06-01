@@ -51,14 +51,14 @@ const ChatWidget = ({ config: userConfig }) => {
   // Add session tracking on component mount
   useEffect(() => {
     // Track page load/refresh as a new session
-    trackUserAction('session_start', { 
+    trackUserAction("session_start", {
       referrer: document.referrer,
-      userAgent: navigator.userAgent
+      userAgent: navigator.userAgent,
     });
-    
+
     // Track session end on unmount
     return () => {
-      trackUserAction('session_end');
+      trackUserAction("session_end");
     };
   }, [trackUserAction]);
 
@@ -123,8 +123,8 @@ const ChatWidget = ({ config: userConfig }) => {
     if (!text.trim() || streaming) return;
 
     // Track user question
-    trackUserAction('question_asked', { question: text });
-    
+    trackUserAction("question_asked", { question: text });
+
     // Add user message to chat
     setChatHistory((prev) => [...prev, { role: "user", text }]);
     setStreaming(true);
@@ -184,7 +184,7 @@ const ChatWidget = ({ config: userConfig }) => {
   };
 
   // Handle schedule form submission
-  const handleScheduleSubmit = (e) => {
+  const handleScheduleSubmit = async (e) => {
     e.preventDefault();
 
     // Validate form
@@ -205,49 +205,75 @@ const ChatWidget = ({ config: userConfig }) => {
       return;
     }
 
-    // Add appointment details to chat
-    setChatHistory((prev) => [
-      ...prev,
-      {
-        role: "user",
-        text: `I'd like to schedule an appointment with the following details:
+    try {
+      // Capture lead in analytics
+      const leadResponse = await fetch(
+        `http://localhost:8000/analytics/leads`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            name: scheduleFormData.name,
+            lead_type: "appointment_scheduled",
+          }),
+        }
+      );
+
+      if (!leadResponse.ok) {
+        console.error("Failed to capture lead");
+      }
+
+      console.log("Lead captured");
+
+      // Add appointment details to chat
+      setChatHistory((prev) => [
+        ...prev,
+        {
+          role: "user",
+          text: `I'd like to schedule an appointment with the following details:
 - Name: ${scheduleFormData.name}
 - Patient ID: ${scheduleFormData.patientId}
 - Date: ${scheduleFormData.date}
 - Time: ${scheduleFormData.timeSlot}`,
-      },
-    ]);
+        },
+      ]);
 
-    // Send appointment details to backend
-    sendMessage({
-      user_input: `Schedule appointment for patient ${scheduleFormData.patientId} named ${scheduleFormData.name} on ${scheduleFormData.date} during ${scheduleFormData.timeSlot}`,
-      appointment_details: {
-        name: scheduleFormData.name,
-        patient_id: scheduleFormData.patientId,
-        date: scheduleFormData.date,
-        time_slot: scheduleFormData.timeSlot,
-      },
-    });
-
-    setStreaming(true);
-    setScheduleFormSubmitted(true);
-    setShowScheduleForm(false);
-
-    // Reset form after submission
-    setTimeout(() => {
-      setScheduleFormData({
-        name: "",
-        patientId: "",
-        date: "",
-        timeSlot: "",
+      // Send appointment details to backend
+      sendMessage({
+        user_input: `Schedule appointment for patient ${scheduleFormData.patientId} named ${scheduleFormData.name} on ${scheduleFormData.date} during ${scheduleFormData.timeSlot}`,
+        appointment_details: {
+          name: scheduleFormData.name,
+          patient_id: scheduleFormData.patientId,
+          date: scheduleFormData.date,
+          time_slot: scheduleFormData.timeSlot,
+        },
       });
-      setScheduleFormSubmitted(false);
-    }, 1000);
+
+      setStreaming(true);
+      setScheduleFormSubmitted(true);
+      setShowScheduleForm(false);
+
+      // Reset form after submission
+      setTimeout(() => {
+        setScheduleFormData({
+          name: "",
+          patientId: "",
+          date: "",
+          timeSlot: "",
+        });
+        setScheduleFormSubmitted(false);
+      }, 1000);
+    } catch (error) {
+      console.error("Error submitting appointment:", error);
+      setScheduleError("Failed to submit appointment. Please try again.");
+    }
   };
 
   // Add tracking to chatbot open function
   const handleChatbotOpen = () => {
-    trackUserAction('chatbot_opened', { method: 'button_click' });
+    trackUserAction("chatbot_opened", { method: "button_click" });
     window.openChatbot();
   };
 
@@ -509,4 +535,3 @@ const ChatWidget = ({ config: userConfig }) => {
 };
 
 export default ChatWidget;
-

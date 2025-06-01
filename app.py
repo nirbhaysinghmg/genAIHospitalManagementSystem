@@ -34,7 +34,7 @@ app = FastAPI(title="Google Gen AI RAG App with ChromaDB")
 # Add CORS middleware with specific origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],  # Add your frontend URL
+    allow_origins=["*"],  # Add your frontend URL
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -82,12 +82,12 @@ def get_vector_store():
             content = "\n".join([f"{k}: {v}" for k, v in row_dict.items()])
             
             # Use the first column as the source identifier
-            source = str(row.iloc[0])
+            # source = str(row.iloc[0])
             
             # Split the content into chunks
             chunks = splitter.split_text(content)
             for chunk in chunks:
-                documents.append(Document(page_content=chunk, metadata={"source": source, "row": idx}))
+                documents.append(Document(page_content=chunk))
 
         print(f"Created {len(documents)} document chunks")
         
@@ -171,7 +171,7 @@ async def query_qa(req: QueryRequest):
     qa = ConversationalRetrievalChain.from_llm(
         llm=llm,
         retriever=retriever,
-        return_source_documents=True,
+        # return_source_documents=True,
         combine_docs_chain_kwargs={"prompt": SYSTEM_PROMPT}
     )
     
@@ -191,10 +191,10 @@ async def query_qa(req: QueryRequest):
             chat_histories[session_id] = chat_histories[session_id][-10:]
         
         # Get source documents
-        source_docs = result.get("source_documents", [])
-        sources = [doc.metadata["source"] for doc in source_docs]
+        # source_docs = result.get("source_documents", [])
+        # sources = [doc.metadata["source"] for doc in source_docs]
         
-        return {"answer": answer, "sources": sources}
+        return {"answer": answer}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -308,15 +308,15 @@ def record_user_event(user_id: str, session_id: str, event_type: str, event_data
                 (conversation_id, session_id, user_id, timestamp),
                 fetch=False
             )
-                
+            
             # Record the session start event
             execute_query(
                 """
                 INSERT INTO messages 
                 (message_id, conversation_id, user_id, message_type, content, timestamp)
-                VALUES (UUID(), %s, %s, 'system', %s, %s)
+                VALUES (UUID(), %s, %s, 'system', 'session_start', %s)
                 """,
-                (conversation_id, user_id, json_lib.dumps({"event": "session_start"}), timestamp),
+                (conversation_id, user_id, timestamp),
                 fetch=False
             )
             
@@ -342,21 +342,21 @@ def record_user_event(user_id: str, session_id: str, event_type: str, event_data
                     (message_id, conversation_id, user_id, message_type, content, timestamp)
                     VALUES (UUID(), %s, %s, 'user', %s, %s)
                     """,
-                    (conversation_id, user_id, json_lib.dumps(event_data), timestamp),
+                    (conversation_id, user_id, event_data.get('question', ''), timestamp),
                     fetch=False
                 )
                 
                 # Update user message count
-                execute_query(
-                    """
-                    UPDATE users 
-                    SET total_messages = total_messages + 1,
+            execute_query(
+                """
+                UPDATE users 
+                SET total_messages = total_messages + 1,
                         last_active_at = %s
-                    WHERE user_id = %s
-                    """,
-                    (timestamp, user_id),
-                    fetch=False
-                )
+                WHERE user_id = %s
+                """,
+                (timestamp, user_id),
+                fetch=False
+            )
             
         elif event_type == "bot_response":
             # Get the active conversation
@@ -374,15 +374,15 @@ def record_user_event(user_id: str, session_id: str, event_type: str, event_data
                 conversation_id = conversation[0]['conversation_id']
                 
                 # Record the bot's response
-                execute_query(
-                    """
+            execute_query(
+                """
                     INSERT INTO messages 
                     (message_id, conversation_id, user_id, message_type, content, timestamp)
                     VALUES (UUID(), %s, %s, 'bot', %s, %s)
                     """,
-                    (conversation_id, user_id, json_lib.dumps(event_data), timestamp),
-                    fetch=False
-                )
+                    (conversation_id, user_id, event_data.get('response', ''), timestamp),
+                fetch=False
+            )
             
         elif event_type == "session_end":
             # Get the active conversation
@@ -400,39 +400,39 @@ def record_user_event(user_id: str, session_id: str, event_type: str, event_data
                 conversation_id = conversation[0]['conversation_id']
                 
                 # Update conversation status
-                execute_query(
-                    """
+            execute_query(
+                """
                     UPDATE conversations 
-                    SET end_time = %s,
+                SET end_time = %s,
                         status = 'completed',
-                        duration = TIMESTAMPDIFF(SECOND, start_time, %s)
+                    duration = TIMESTAMPDIFF(SECOND, start_time, %s)
                     WHERE conversation_id = %s
-                    """,
+                """,
                     (timestamp, timestamp, conversation_id),
-                    fetch=False
-                )
-                
+                fetch=False
+            )
+            
                 # Record the session end event
-                execute_query(
+            execute_query(
                     """
                     INSERT INTO messages 
                     (message_id, conversation_id, user_id, message_type, content, timestamp)
-                    VALUES (UUID(), %s, %s, 'system', %s, %s)
+                    VALUES (UUID(), %s, %s, 'system', 'session_end', %s)
                     """,
-                    (conversation_id, user_id, json_lib.dumps({"event": "session_end"}), timestamp),
-                    fetch=False
-                )
-            
+                    (conversation_id, user_id, timestamp),
+                fetch=False
+            )
+        
             # Update user status
-            execute_query(
-                """
+        execute_query(
+            """
                 UPDATE users 
                 SET is_active = FALSE
                 WHERE user_id = %s
-                """,
+            """,
                 (user_id,),
-                fetch=False
-            )
+            fetch=False
+        )
         
     except Error as e:
         print(f"Error recording user event: {e}")
@@ -559,7 +559,7 @@ async def websocket_endpoint_ws(websocket: WebSocket):
                     qa = ConversationalRetrievalChain.from_llm(
                         llm=llm,
                         retriever=retriever,
-                        return_source_documents=True,
+                        # return_source_documents=True,
                         combine_docs_chain_kwargs={"prompt": SYSTEM_PROMPT}
                     )
                     
@@ -580,7 +580,7 @@ async def websocket_endpoint_ws(websocket: WebSocket):
                             {
                                 "response": answer,
                                 "timestamp": datetime.now().isoformat(),
-                                "sources": [doc.metadata["source"] for doc in result.get("source_documents", [])],
+                                # "sources": [doc.metadata["source"] for doc in result.get("source_documents", [])],
                                 "response_time": response_time
                             }
                         )
@@ -605,18 +605,18 @@ async def websocket_endpoint_ws(websocket: WebSocket):
                             chat_histories[session_id] = chat_histories[session_id][-10:]
                         
                         # Get source documents
-                        source_docs = result.get("source_documents", [])
-                        sources = [doc.metadata["source"] for doc in source_docs]
+                        # source_docs = result.get("source_documents", [])
+                        # sources = [doc.metadata["source"] for doc in source_docs]
                         
                         # Send response back to client
                         response = {
                             "text": answer,
-                            "sources": sources,
+                            # "sources": sources,
                             "done": True
                         }
                         await websocket.send_json(response)
                         print(f"Response sent successfully for session {session_id}")
-                        
+                        0.2
                     except Exception as e:
                         error_msg = f"Error processing request: {str(e)}"
                         print(error_msg)
@@ -863,8 +863,11 @@ async def get_conversation_analytics():
                 COUNT(CASE WHEN status = 'active' THEN 1 END) as active_conversations,
                 COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed_conversations,
                 COUNT(CASE WHEN status = 'handover' THEN 1 END) as handover_conversations,
-                AVG(duration) as avg_duration
-            FROM conversations
+                AVG(duration) as avg_duration,
+                COUNT(CASE WHEN message_type = 'user' THEN 1 END) as user_messages
+            FROM conversations c
+            LEFT JOIN messages m ON c.conversation_id = m.conversation_id
+            GROUP BY c.conversation_id
         """)[0]
 
         # Get recent conversations with message counts
@@ -875,7 +878,7 @@ async def get_conversation_analytics():
                 c.start_time,
                 c.duration,
                 c.status,
-                COUNT(m.message_id) as message_count
+                COUNT(CASE WHEN m.message_type = 'user' THEN 1 END) as message_count
             FROM conversations c
             LEFT JOIN messages m ON c.conversation_id = m.conversation_id
             GROUP BY c.conversation_id
@@ -889,6 +892,7 @@ async def get_conversation_analytics():
             "completed_conversations": stats['completed_conversations'] or 0,
             "handover_conversations": stats['handover_conversations'] or 0,
             "average_duration": round(stats['avg_duration'], 2) if stats['avg_duration'] else 0,
+            "total_messages": stats['user_messages'] or 0,
             "recent_conversations": recent_conversations or []
         }
     except Error as e:
@@ -899,20 +903,35 @@ async def get_conversation_analytics():
             "completed_conversations": 0,
             "handover_conversations": 0,
             "average_duration": 0,
+            "total_messages": 0,
             "recent_conversations": []
         }
 
 @app.get("/analytics/messages", tags=["analytics"])
 async def get_message_analytics():
     try:
-        # Get message statistics
+        # Get message statistics - count each user-bot interaction as 1
         stats = execute_query("""
             SELECT 
-                COUNT(*) as total_messages,
-                COUNT(CASE WHEN message_type = 'user' THEN 1 END) as user_messages,
-                COUNT(CASE WHEN message_type = 'bot' THEN 1 END) as bot_messages,
-                COUNT(CASE WHEN message_type = 'system' THEN 1 END) as system_messages
-            FROM messages
+                COUNT(DISTINCT CASE 
+                    WHEN m1.message_type = 'user' AND m2.message_type = 'bot' 
+                    AND m1.conversation_id = m2.conversation_id 
+                    THEN m1.message_id 
+                END) as total_messages,
+                COUNT(CASE WHEN m1.message_type = 'user' THEN 1 END) as user_messages,
+                COUNT(CASE WHEN m1.message_type = 'bot' THEN 1 END) as bot_messages,
+                COUNT(CASE WHEN m1.message_type = 'system' THEN 1 END) as system_messages
+            FROM messages m1
+            LEFT JOIN messages m2 ON m1.conversation_id = m2.conversation_id 
+                AND m2.message_type = 'bot'
+                AND m2.timestamp > m1.timestamp
+                AND NOT EXISTS (
+                    SELECT 1 FROM messages m3 
+                    WHERE m3.conversation_id = m1.conversation_id 
+                    AND m3.message_type = 'bot'
+                    AND m3.timestamp > m1.timestamp 
+                    AND m3.timestamp < m2.timestamp
+                )
         """)[0]
 
         # Get recent messages with details
@@ -1134,6 +1153,61 @@ def update_sessions_table():
 
 # Call this when the app starts
 update_sessions_table()
+
+@app.post("/analytics/leads", tags=["analytics"])
+async def capture_lead(lead_data: dict):
+    try:
+        # Generate a unique lead ID
+        lead_id = str(uuid.uuid4())
+        
+        # Insert the lead into the analytics table
+        execute_query(
+            """
+            INSERT INTO lead_analytics 
+            (lead_id, lead_type, name, created_at, updated_at)
+            VALUES (%s, %s, %s, %s, %s)
+            """,
+            (
+                lead_id,
+                'appointment_scheduled',
+                lead_data.get('name', ''),
+                datetime.now().isoformat(),
+                datetime.now().isoformat()
+            ),
+            fetch=False
+        )
+        
+        return {"status": "success", "lead_id": lead_id}
+    except Error as e:
+        print(f"Error capturing lead: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/analytics/leads", tags=["analytics"])
+async def get_lead_analytics():
+    try:
+        # Get lead statistics
+        stats = execute_query("""
+            SELECT 
+                COUNT(*) as total_leads,
+                COUNT(CASE WHEN lead_type = 'appointment_scheduled' THEN 1 END) as scheduled_leads,
+                DATE(created_at) as date,
+                COUNT(*) as daily_leads
+            FROM lead_analytics
+            GROUP BY DATE(created_at)
+            ORDER BY date DESC
+            LIMIT 30
+        """)
+        
+        return {
+            "total_leads": len(stats) or 0,
+            "daily_leads": stats or []
+        }
+    except Error as e:
+        print(f"Error in lead analytics: {str(e)}")
+        return {
+            "total_leads": 0,
+            "daily_leads": []
+        }
 
 if __name__ == "__main__":
     import uvicorn
