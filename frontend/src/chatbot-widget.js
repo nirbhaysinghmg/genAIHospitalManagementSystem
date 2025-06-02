@@ -172,10 +172,10 @@ if (typeof window !== "undefined") {
         detail: { method: "global_function" },
       });
       document.dispatchEvent(event);
-      
+
       // Send analytics event directly via WebSocket if available
       if (window.sendAnalyticsEvent) {
-        window.sendAnalyticsEvent('chatbot_opened', { method: 'button_click' });
+        window.sendAnalyticsEvent("chatbot_opened", { method: "button_click" });
       }
     }
 
@@ -192,4 +192,3 @@ if (typeof window !== "undefined") {
     if (greeting) greeting.style.display = "none";
   };
 }
-

@@ -20,6 +20,7 @@ const ChatWidget = ({ config: userConfig }) => {
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [fullScreen, setFullScreen] = useState(false);
+  const [feedback, setFeeback] = useState(false);
 
   // Scheduling form state
   const [showScheduleForm, setShowScheduleForm] = useState(false);
