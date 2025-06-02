@@ -299,16 +299,16 @@ def record_user_event(user_id: str, session_id: str, event_type: str, event_data
             
             # Create a new conversation for this session
             conversation_id = str(uuid.uuid4())
-            execute_query(
-                """
+                execute_query(
+                    """
                 INSERT INTO conversations 
                 (conversation_id, session_id, user_id, start_time, status)
                 VALUES (%s, %s, %s, %s, 'active')
                 """,
                 (conversation_id, session_id, user_id, timestamp),
-                fetch=False
-            )
-            
+                    fetch=False
+                )
+                
             # Record the session start event
             execute_query(
                 """
@@ -508,7 +508,7 @@ async def websocket_endpoint_ws(websocket: WebSocket):
                     new_user_id = message["user_id"]
                     
                     # First ensure the user exists by recording the identification event
-                    record_user_event(
+                        record_user_event(
                         new_user_id,
                         session_id,
                         "user_identified",
@@ -921,8 +921,7 @@ async def get_message_analytics():
                     THEN m1.message_id 
                 END) as total_messages,
                 COUNT(CASE WHEN m1.message_type = 'user' THEN 1 END) as user_messages,
-                COUNT(CASE WHEN m1.message_type = 'bot' THEN 1 END) as bot_messages,
-                COUNT(CASE WHEN m1.message_type = 'system' THEN 1 END) as system_messages
+                COUNT(CASE WHEN m1.message_type = 'bot' THEN 1 END) as bot_messages
             FROM messages m1
             LEFT JOIN messages m2 ON m1.conversation_id = m2.conversation_id 
                 AND m2.message_type = 'bot'
@@ -934,6 +933,7 @@ async def get_message_analytics():
                     AND m3.timestamp > m1.timestamp 
                     AND m3.timestamp < m2.timestamp
                 )
+            WHERE m1.message_type IN ('user', 'bot')
         """)[0]
 
         # Get recent messages with details
@@ -946,6 +946,7 @@ async def get_message_analytics():
                 m.content,
                 m.timestamp
             FROM messages m
+            WHERE m.message_type IN ('user', 'bot')
             ORDER BY m.timestamp DESC
             LIMIT 20
         """)
@@ -954,7 +955,6 @@ async def get_message_analytics():
             "total_messages": stats['total_messages'] or 0,
             "user_messages": stats['user_messages'] or 0,
             "bot_messages": stats['bot_messages'] or 0,
-            "system_messages": stats['system_messages'] or 0,
             "recent_messages": recent_messages or []
         }
     except Error as e:
@@ -963,7 +963,6 @@ async def get_message_analytics():
             "total_messages": 0,
             "user_messages": 0,
             "bot_messages": 0,
-            "system_messages": 0,
             "recent_messages": []
         }
 
@@ -1215,7 +1214,6 @@ if __name__ == "__main__":
     import uvicorn
     print("Starting server on http://0.0.0.0:8000")
     uvicorn.run(app, host="0.0.0.0", port=8000)
-
 
 
 
