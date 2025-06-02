@@ -506,7 +506,19 @@ async def websocket_endpoint_ws(websocket: WebSocket):
                 # Extract user_id from message if provided
                 if "user_id" in message and message["user_id"]:
                     new_user_id = message["user_id"]
-                    # Update the session with the real user ID
+                    
+                    # First ensure the user exists by recording the identification event
+                    record_user_event(
+                        new_user_id,
+                        session_id,
+                        "user_identified",
+                        {
+                            "timestamp": datetime.now().isoformat(),
+                            "previous_id": user_id
+                        }
+                    )
+                    
+                    # Now that we know the user exists, update the session
                     execute_query(
                         """
                         UPDATE sessions 
@@ -517,16 +529,6 @@ async def websocket_endpoint_ws(websocket: WebSocket):
                         fetch=False
                     )
                     
-                    # Record user identification
-                    record_user_event(
-                        new_user_id,
-                        session_id,
-                        "user_identified",
-                        {
-                            "timestamp": datetime.now().isoformat(),
-                            "previous_id": user_id
-                        }
-                    )
                     user_id = new_user_id
                 
                 # Process the message
@@ -1213,7 +1215,6 @@ if __name__ == "__main__":
     import uvicorn
     print("Starting server on http://0.0.0.0:8000")
     uvicorn.run(app, host="0.0.0.0", port=8000)
-
 
 
 
