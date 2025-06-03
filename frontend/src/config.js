@@ -14,21 +14,54 @@ const config = {
   },
   // Customizable introductory message
   introductionText: `
-### 👋 Welcome to Healthcare AI Assistant
-I can help you with appointments, medical information, and more.
+### 👋 Welcome to our AI Help Chat.
   `,
   // Suggested questions that will appear after assistant replies
   suggestedQuestions: [
-    "Schedule an appointment For Me",
-    "What are the departments in this hospital?",
-    "What are the services offered in this hospital?",
-    "What are the specializations in this hospital?",
-    "What insurance plans do you accept?",
-    "Do I need a referral to see a specialist?",
-    "How can I refill my prescription?",
-    "What should I do to prepare for my appointment?",
-    "Where are your facilities located?",
-    "How do I cancel or reschedule an appointment?",
+    // Four Wheeler Tyres - Popular Brands
+    "Show me tyres for Maruti Suzuki cars",
+    "Show me tyres for Hyundai vehicles",
+    "Show me tyres for Toyota cars",
+    "Show me tyres for Honda vehicles",
+    "Show me tyres for Mahindra & Mahindra cars",
+    "Show me tyres for Tata Motors vehicles",
+    "Show me tyres for Ford cars",
+
+    // Four Wheeler Tyres - By Body Type
+    "Best tyres for small cars",
+    "Best tyres for hatchbacks",
+    "Best tyres for premium hatchbacks",
+    "Best tyres for SUVs",
+    "Best tyres for compact SUVs",
+    "Best tyres for all terrain SUVs",
+    "Best tyres for luxury SUVs",
+    "Best tyres for sedans",
+    "Best tyres for luxury sedans",
+
+    // Four Wheeler Tyres - By Rim Size
+    "Show me R14 - 14 inch tyres",
+    "Show me R15 - 15 inch tyres",
+    "Show me R16 - 16 inch tyres",
+    "Show me R17 - 17 inch tyres",
+    "Show me R18 - 18 inch tyres",
+    "Show me R19 - 19 inch tyres",
+    "Show me R20 - 20 inch tyres",
+
+    // Two Wheeler Tyres - Popular Brands
+    "Show me tyres for Hero bikes",
+    "Show me tyres for Honda bikes",
+    "Show me tyres for Royal Enfield bikes",
+    "Show me tyres for Bajaj bikes",
+    "Show me tyres for TVS bikes",
+    "Show me tyres for Yamaha bikes",
+
+    // Two Wheeler Tyres - By Bike Segment
+    "Best tyres for sport touring bikes",
+    "Best tyres for city urban bikes",
+    "Best tyres for cruisers",
+    "Best tyres for enduro bikes",
+    "Best tyres for scooters",
+    "Best tyres for street sports bikes",
   ],
   // Number of questions to show at a time (default: 3)
   showNumberOfQuestions: 3,

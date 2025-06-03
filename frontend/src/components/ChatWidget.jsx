@@ -7,6 +7,236 @@ import { useChatSocket } from "../hooks/useChatSocket";
 import defaultConfig from "../config";
 import "./ChatWidget.css"; // Import CSS from the same directory
 
+const FeedbackPrompt = ({ onYes, onNo }) => (
+  <div
+    style={{
+      marginTop: 8,
+      marginBottom: 8,
+      background: "#f7f7f7",
+      borderRadius: 8,
+      padding: 12,
+      display: "flex",
+      alignItems: "center",
+      gap: 12,
+    }}
+  >
+    <span>Was this helpful?</span>
+    <button
+      style={{
+        background: "#4caf50",
+        color: "#fff",
+        border: "none",
+        borderRadius: 4,
+        padding: "4px 12px",
+        cursor: "pointer",
+      }}
+      onClick={onYes}
+    >
+      Yes
+    </button>
+    <button
+      style={{
+        background: "#f44336",
+        color: "#fff",
+        border: "none",
+        borderRadius: 4,
+        padding: "4px 12px",
+        cursor: "pointer",
+      }}
+      onClick={onNo}
+    >
+      No
+    </button>
+  </div>
+);
+
+const FeedbackForm = ({ onClose, onSubmit }) => {
+  const [issues, setIssues] = useState([]);
+  const [otherText, setOtherText] = useState("");
+  const [supportOption, setSupportOption] = useState("");
+  const [execMethod, setExecMethod] = useState("");
+
+  const issueOptions = [
+    { value: "off-topic", label: "The answer was off-topic" },
+    { value: "too-short", label: "It was too short" },
+    { value: "too-complex", label: "It was too complex" },
+    { value: "different-help", label: "I need a different kind of help" },
+    { value: "other", label: "Other:" },
+  ];
+
+  const handleIssueChange = (val) => {
+    if (issues.includes(val)) {
+      setIssues(issues.filter((i) => i !== val));
+      if (val === "other") setOtherText("");
+    } else {
+      setIssues([...issues, val]);
+    }
+  };
+
+  const canSubmit =
+    issues.length > 0 &&
+    supportOption &&
+    (supportOption !== "talk-exec" || execMethod);
+
+  const handleSubmit = () => {
+    const feedback = {
+      issues,
+      otherText: issues.includes("other") ? otherText : "",
+      supportOption,
+      execMethod: supportOption === "talk-exec" ? execMethod : "",
+    };
+    onSubmit(feedback);
+  };
+
+  return (
+    <div
+      style={{
+        marginTop: 8,
+        marginBottom: 8,
+        background: "#fffbe6",
+        border: "1px solid #ffe58f",
+        borderRadius: 8,
+        padding: 16,
+        maxWidth: 400,
+      }}
+    >
+      <div style={{ fontWeight: 600, marginBottom: 8 }}>
+        What seems to be the issue?{" "}
+        <span style={{ fontWeight: 400, fontSize: 13 }}>
+          (Choose one or more)
+        </span>
+      </div>
+      <div style={{ marginBottom: 12 }}>
+        {issueOptions.map((opt) => (
+          <div key={opt.value} style={{ marginBottom: 4 }}>
+            <label>
+              <input
+                type="checkbox"
+                checked={issues.includes(opt.value)}
+                onChange={() => handleIssueChange(opt.value)}
+                style={{ marginRight: 6 }}
+              />
+              {opt.label}
+              {opt.value === "other" && issues.includes("other") && (
+                <input
+                  type="text"
+                  value={otherText}
+                  onChange={(e) => setOtherText(e.target.value)}
+                  placeholder="Please specify"
+                  style={{
+                    marginLeft: 8,
+                    padding: 2,
+                    borderRadius: 4,
+                    border: "1px solid #ccc",
+                    width: 140,
+                  }}
+                />
+              )}
+            </label>
+          </div>
+        ))}
+      </div>
+      <div style={{ fontWeight: 600, marginBottom: 8 }}>Would you like to:</div>
+      <div style={{ marginBottom: 12 }}>
+        <label>
+          <input
+            type="radio"
+            name="support"
+            value="rephrase"
+            checked={supportOption === "rephrase"}
+            onChange={() => setSupportOption("rephrase")}
+            style={{ marginRight: 6 }}
+          />
+          Try rephrasing your question
+        </label>
+        <br />
+        <label>
+          <input
+            type="radio"
+            name="support"
+            value="talk-exec"
+            checked={supportOption === "talk-exec"}
+            onChange={() => setSupportOption("talk-exec")}
+            style={{ marginRight: 6 }}
+          />
+          Talk to a human executive
+        </label>
+      </div>
+      {supportOption === "talk-exec" && (
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>
+            Preferred method to connect?
+          </div>
+          <label>
+            <input
+              type="radio"
+              name="exec-method"
+              value="chat"
+              checked={execMethod === "chat"}
+              onChange={() => setExecMethod("chat")}
+              style={{ marginRight: 6 }}
+            />
+            Chat now
+          </label>
+          <br />
+          <label>
+            <input
+              type="radio"
+              name="exec-method"
+              value="call"
+              checked={execMethod === "call"}
+              onChange={() => setExecMethod("call")}
+              style={{ marginRight: 6 }}
+            />
+            Schedule a call
+          </label>
+          <br />
+          <label>
+            <input
+              type="radio"
+              name="exec-method"
+              value="email"
+              checked={execMethod === "email"}
+              onChange={() => setExecMethod("email")}
+              style={{ marginRight: 6 }}
+            />
+            Email me back
+          </label>
+        </div>
+      )}
+      <div style={{ display: "flex", gap: 8 }}>
+        <button
+          style={{
+            background: canSubmit ? "#0066cc" : "#ccc",
+            color: "#fff",
+            border: "none",
+            borderRadius: 4,
+            padding: "4px 12px",
+            cursor: canSubmit ? "pointer" : "not-allowed",
+          }}
+          onClick={handleSubmit}
+          disabled={!canSubmit}
+        >
+          Submit
+        </button>
+        <button
+          style={{
+            background: "#eee",
+            color: "#333",
+            border: "none",
+            borderRadius: 4,
+            padding: "4px 12px",
+            cursor: "pointer",
+          }}
+          onClick={onClose}
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+};
+
 const ChatWidget = ({ config: userConfig }) => {
   // Merge config with defaults
   const cfg = { ...defaultConfig, ...userConfig };
@@ -39,6 +269,20 @@ const ChatWidget = ({ config: userConfig }) => {
     allQuestions.slice(0, triggerCount)
   );
 
+  // Feedback state
+  const [feedbackState, setFeedbackState] = useState({
+    showPrompt: false,
+    showForm: false,
+    lastAssistantIdx: null,
+    submitted: false,
+  });
+
+  // Track session start time
+  const [sessionStartTime, setSessionStartTime] = useState(Date.now());
+  useEffect(() => {
+    setSessionStartTime(Date.now());
+  }, []);
+
   const chatEndRef = useRef(null);
   const textareaRef = useRef(null);
 
@@ -56,11 +300,6 @@ const ChatWidget = ({ config: userConfig }) => {
       referrer: document.referrer,
       userAgent: navigator.userAgent,
     });
-
-    // Track session end on unmount
-    return () => {
-      trackUserAction("session_end");
-    };
   }, [trackUserAction]);
 
   // Seed the initial system message
@@ -108,6 +347,26 @@ const ChatWidget = ({ config: userConfig }) => {
     }
     return () => clearTimeout(timer);
   }, [streaming, chatHistory, usedQuestions, allQuestions, triggerCount]);
+
+  // Show feedback prompt after each new assistant message
+  useEffect(() => {
+    // Find the last assistant message
+    const lastIdx = [...chatHistory]
+      .reverse()
+      .findIndex((m) => m.role === "assistant");
+    if (lastIdx !== -1) {
+      const idx = chatHistory.length - 1 - lastIdx;
+      if (feedbackState.lastAssistantIdx !== idx) {
+        setFeedbackState({
+          showPrompt: true,
+          showForm: false,
+          lastAssistantIdx: idx,
+          submitted: false,
+        });
+      }
+    }
+    // eslint-disable-next-line
+  }, [chatHistory]);
 
   // Toggle fullscreen mode
   const toggleFullScreen = () => {
@@ -278,6 +537,95 @@ const ChatWidget = ({ config: userConfig }) => {
     window.openChatbot();
   };
 
+  const handleFeedbackYes = () => {
+    setFeedbackState((f) => ({ ...f, showPrompt: false, submitted: true }));
+  };
+  const handleFeedbackNo = () => {
+    setFeedbackState((f) => ({ ...f, showPrompt: false, showForm: true }));
+  };
+  const handleFeedbackFormSubmit = (data) => {
+    setFeedbackState((f) => ({ ...f, showForm: false, submitted: true }));
+    // Optionally send feedback to backend here
+    // If user opted for human handover, log it
+    if (data.supportOption === "talk-exec") {
+      const userId = localStorage.getItem("healthcare_user_id") || "";
+      const sessionId = localStorage.getItem("healthcare_session_id") || "";
+      // Find the last user message
+      const lastUserMsg =
+        [...chatHistory].reverse().find((m) => m.role === "user")?.text || "";
+      fetch("http://localhost:8000/analytics/human_handover", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: userId,
+          session_id: sessionId,
+          issues: data.issues,
+          other_text: data.otherText,
+          method: data.execMethod,
+          support_option: data.supportOption,
+          requested_at: new Date()
+            .toISOString()
+            .replace("T", " ")
+            .replace("Z", "")
+            .split(".")[0],
+          last_message: lastUserMsg,
+        }),
+      }).catch(() => {});
+    }
+  };
+  const handleFeedbackFormClose = () => {
+    setFeedbackState((f) => ({ ...f, showForm: false }));
+  };
+
+  // Add this function inside ChatWidget
+  const handleCloseChatbot = () => {
+    const userId = localStorage.getItem("healthcare_user_id") || "";
+    const sessionId = localStorage.getItem("healthcare_session_id") || "";
+    const closedAt = new Date();
+    const timeSpentSeconds = Math.floor((Date.now() - sessionStartTime) / 1000);
+    const lastUserMsg =
+      [...chatHistory].reverse().find((m) => m.role === "user")?.text || "";
+    const lastBotMsg =
+      [...chatHistory].reverse().find((m) => m.role === "assistant")?.text ||
+      "";
+
+    // Record chatbot close event
+    fetch("http://localhost:8000/analytics/chatbot_close", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        user_id: userId,
+        session_id: sessionId,
+        closed_at: closedAt
+          .toISOString()
+          .replace("T", " ")
+          .replace("Z", "")
+          .split(".")[0],
+        time_spent_seconds: timeSpentSeconds,
+        last_user_message: lastUserMsg,
+        last_bot_message: lastBotMsg,
+      }),
+    }).catch(() => {});
+
+    // Record session end event
+    fetch("http://localhost:8000/analytics/session_end", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        user_id: userId,
+        session_id: sessionId,
+        end_time: closedAt
+          .toISOString()
+          .replace("T", " ")
+          .replace("Z", "")
+          .split(".")[0],
+        duration: timeSpentSeconds,
+      }),
+    }).catch(() => {});
+
+    window.closeChatbot?.();
+  };
+
   return (
     <div
       id="chatbot"
@@ -336,7 +684,7 @@ const ChatWidget = ({ config: userConfig }) => {
               )}
             </button>
             <button
-              onClick={() => window.closeChatbot?.()}
+              onClick={handleCloseChatbot}
               className="close-button"
               aria-label="Close chat"
             >
@@ -379,6 +727,25 @@ const ChatWidget = ({ config: userConfig }) => {
                   {msg.text}
                 </ReactMarkdown>
               </div>
+              {/* Feedback prompt for the most recent assistant answer */}
+              {msg.role === "assistant" &&
+                i === feedbackState.lastAssistantIdx &&
+                feedbackState.showPrompt &&
+                !feedbackState.submitted && (
+                  <FeedbackPrompt
+                    onYes={handleFeedbackYes}
+                    onNo={handleFeedbackNo}
+                  />
+                )}
+              {/* Feedback form if user said No */}
+              {msg.role === "assistant" &&
+                i === feedbackState.lastAssistantIdx &&
+                feedbackState.showForm && (
+                  <FeedbackForm
+                    onClose={handleFeedbackFormClose}
+                    onSubmit={handleFeedbackFormSubmit}
+                  />
+                )}
             </div>
           ))}
 

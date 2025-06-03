@@ -3,6 +3,7 @@
 import React from "react";
 import ReactDOM from "react-dom";
 import ChatWidget from "./components/ChatWidget";
+import AnalyticsDashboard from "./AnalyticsDashboard";
 import "./components/ChatWidget.css"; // Widget styles
 // UMD export: exposes HealthcareAIWidget.init(...)
 const HealthcareAIWidget = {
@@ -32,6 +33,12 @@ const HealthcareAIWidget = {
 
     if (!container) {
       console.error(`Chatbot container not found: ${config.container}`);
+      return;
+    }
+
+    // If the container is for analytics dashboard, render that instead
+    if (container.id === "analytics-dashboard") {
+      ReactDOM.render(<AnalyticsDashboard />, container);
       return;
     }
 

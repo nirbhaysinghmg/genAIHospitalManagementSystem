@@ -11,16 +11,15 @@ const HealthcareAIWidget = {
     const config = {
       container: "#healthcare-ai-container",
       baseUrl: "http://localhost:8000",
-      companyName: "Healthcare AI",
+      companyName: "AI Help Chat",
       companyLogo: "/logo.png",
       primaryColor: "#0066cc",
       showButton: true,
       showGreeting: true,
-      greetingText:
-        "Need help with your healthcare needs? Chat with our AI assistant!",
+      greetingText: "Need help with our Products, Chat with our AI assistant!",
       introductionText:
-        "Hello! I'm your healthcare assistant. How can I help you today?",
-      inputPlaceholder: "Ask about appointments, departments, or services...",
+        "Hello! I'm your chatbot assistant. How can I help you today?",
+      inputPlaceholder: "Ask about products, tyres, or services...",
       ...userConfig,
     };
 
@@ -86,7 +85,7 @@ const HealthcareAIWidget = {
         greeting.innerHTML = `
           <p>${
             config.greetingText ||
-            "Need help with your healthcare needs? Chat with our AI assistant!"
+            "Need help with buying our products? Chat with our AI assistant!"
           }</p>
           <span class="greeting-close">&times;</span>
         `;
